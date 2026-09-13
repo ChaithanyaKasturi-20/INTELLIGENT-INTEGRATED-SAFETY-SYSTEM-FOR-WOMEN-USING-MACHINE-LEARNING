@@ -1,0 +1,758 @@
+{% load static %}
+<html>
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>Crime Intelligence Heatmap</title>
+    <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            background-image: url("{% static 'images/back.jpg' %}");
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            width: 960px;
+            height: 560px;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            background: #f7f7f7;
+            display: block;
+            margin: 0 auto;
+        }
+        .legend {
+            text-align: center;
+            margin-top: 12px;
+            margin-bottom: 18px;
+            font-size: 13px;
+            font-weight: bold;
+            color: #111;
+        }
+        .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0 8px;
+            color: #111;
+        }
+        .legend-swatch {
+            width: 18px;
+            height: 18px;
+            border: 1px solid rgba(0,0,0,0.2);
+            border-radius: 4px;
+        }
+        select {
+            color: #111;
+            background: #fff;
+            border: 1px solid #bbb;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 14px;
+        }
+        option {
+            color: #111;
+            background: #fff;
+        }
+        #stateInfo {
+            text-align: center;
+            color: #111;
+            font-weight: bold;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        #heatmapNotice {
+            text-align: center;
+            color: #123;
+            font-size: 13px;
+            font-weight: bold;
+            margin-bottom: 18px;
+            min-height: 18px;
+        }
+        @media (max-width: 768px) {
+            #map {
+                width: 90%;
+                height: 500px;
+            }
+            select {
+                width: 100%;
+                max-width: 220px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="header">
+    <div id="logo">
+        <h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1>
+    </div>
+    <div id="menu">
+        <ul>
+            <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
+            <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
+            <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
+            <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
+            <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
+            <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
+        </ul>
+    </div>
+</div>
+
+<div id="wrapper">
+    <div id="page">
+        <div id="content">
+            <div class="flower"><img src="{% static 'images/tra.jpg' %}" alt="" width="800" height="200" /></div>
+            <br/><br/>
+            <div class="flower"><center><h1><font size="" align="center">Women's Safety Crime Map</font></h1></center></div>
+            <br/>
+            <center>
+                <table align="center">
+                    <tr>
+                        <td><font size="3" color="black">Crime category:</font></td>
+                        <td><select id="crimeSelect"></select></td>
+                        <td>&nbsp;&nbsp;</td>
+                        <td><font size="3" color="black">Year:</font></td>
+                        <td><select id="yearSelect"></select></td>
+                    </tr>
+                </table>
+            </center>
+
+            <div class="legend">
+                <div class="legend-item"><span class="legend-swatch" style="background:#28a745;"></span>Low</div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#f5c542;"></span>Moderate</div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#ff8c00;"></span>High</div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#d62728;"></span>Very High</div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#e0e0e0;"></span>No Data</div>
+            </div>
+
+            <div style="text-align:center; margin: 10px 0 8px;">
+                <button id="useMyLocationBtn" type="button" style="padding: 8px 16px; font-weight: bold; border: 1px solid #1d4e89; border-radius: 6px; background: #eaf3ff; color: #123; cursor: pointer;">📍 Use My Location</button>
+            </div>
+            <div id="locationStatus" style="text-align:center; color:#123; font-weight:bold; margin-bottom:12px;">Location status: not requested</div>
+
+            <div id="map"></div>
+            <div id="stateInfo">State details: Select a state on the map to view the selected crime intensity.</div>
+            <div id="heatmapNotice">Nearby crime density layer is ready when geographic incident data is available.</div>
+        </div>
+        <div style="clear: both;">&nbsp;</div>
+    </div>
+</div>
+
+<script>
+    const rawData = {{ map_data|safe }};
+    const districtData = {{ district_data|safe }};
+    window.rawData = rawData;
+    window.districtData = districtData;
+    const crimeOptions = {{ crime_options|safe }};
+    const yearOptions = {{ year_options|safe }};
+    const crimeLabels = {{ crime_labels|safe }};
+
+    const stateCentroidMap = {
+        'Andaman and Nicobar': [11.74, 92.70],
+        'Andhra Pradesh': [15.91, 79.74],
+        'Arunachal Pradesh': [28.22, 94.73],
+        'Assam': [26.20, 92.94],
+        'Bihar': [25.79, 85.14],
+        'Chandigarh': [30.73, 76.78],
+        'Chhattisgarh': [21.27, 81.86],
+        'Dadra and Nagar Haveli': [20.27, 73.02],
+        'Daman and Diu': [20.42, 72.85],
+        'Delhi': [28.61, 77.21],
+        'Goa': [15.34, 74.12],
+        'Gujarat': [22.25, 71.19],
+        'Haryana': [29.05, 76.08],
+        'Himachal Pradesh': [31.10, 77.17],
+        'Jammu and Kashmir': [33.45, 75.77],
+        'Jharkhand': [23.36, 85.33],
+        'Karnataka': [15.32, 75.71],
+        'Kerala': [10.85, 76.27],
+        'Lakshadweep': [10.57, 72.64],
+        'Madhya Pradesh': [23.47, 78.66],
+        'Maharashtra': [19.75, 75.71],
+        'Manipur': [24.75, 93.94],
+        'Meghalaya': [25.47, 91.37],
+        'Mizoram': [23.16, 92.87],
+        'Nagaland': [26.16, 94.56],
+        'Odisha': [20.95, 85.09],
+        'Punjab': [31.15, 75.34],
+        'Rajasthan': [27.02, 74.21],
+        'Sikkim': [27.33, 88.61],
+        'Tamil Nadu': [11.12, 78.65],
+        'Telangana': [17.89, 79.07],
+        'Tripura': [23.84, 91.28],
+        'Uttar Pradesh': [26.85, 80.91],
+        'Uttarakhand': [30.32, 79.03],
+        'West Bengal': [22.94, 87.86]
+    };
+
+    const stateNameMap = {
+        'Andaman and Nicobar': 'Andaman and Nicobar',
+        'Andhra Pradesh': 'Andhra Pradesh',
+        'Arunachal Pradesh': 'Arunachal Pradesh',
+        'Assam': 'Assam',
+        'Bihar': 'Bihar',
+        'Chandigarh': 'Chandigarh',
+        'Chhattisgarh': 'Chhattisgarh',
+        'Dadra and Nagar Haveli': 'Dadra and Nagar Haveli',
+        'Daman and Diu': 'Daman and Diu',
+        'Delhi': 'Delhi',
+        'Goa': 'Goa',
+        'Gujarat': 'Gujarat',
+        'Haryana': 'Haryana',
+        'Himachal Pradesh': 'Himachal Pradesh',
+        'Jammu and Kashmir': 'Jammu and Kashmir',
+        'Jharkhand': 'Jharkhand',
+        'Karnataka': 'Karnataka',
+        'Kerala': 'Kerala',
+        'Lakshadweep': 'Lakshadweep',
+        'Madhya Pradesh': 'Madhya Pradesh',
+        'Maharashtra': 'Maharashtra',
+        'Manipur': 'Manipur',
+        'Meghalaya': 'Meghalaya',
+        'Mizoram': 'Mizoram',
+        'Nagaland': 'Nagaland',
+        'Odisha': 'Odisha',
+        'Punjab': 'Punjab',
+        'Rajasthan': 'Rajasthan',
+        'Sikkim': 'Sikkim',
+        'Tamil Nadu': 'Tamil Nadu',
+        'Telangana': 'Telangana',
+        'Tripura': 'Tripura',
+        'Uttar Pradesh': 'Uttar Pradesh',
+        'Uttarakhand': 'Uttarakhand',
+        'West Bengal': 'West Bengal'
+    };
+
+    const crimeSelect = document.getElementById('crimeSelect');
+    const yearSelect = document.getElementById('yearSelect');
+    const stateInfo = document.getElementById('stateInfo');
+    const locationStatus = document.getElementById('locationStatus');
+    const useMyLocationBtn = document.getElementById('useMyLocationBtn');
+
+    const indiaCenter = [22.5, 78.96];
+    const INDIA_GEOJSON_URL = 'https://raw.githubusercontent.com/geohacker/india/master/state/india_state.geojson';
+    const locationMarkerLayer = L.layerGroup();
+    let userLocationMarker = null;
+    let indiaGeoJson = null;
+    let indiaGeoJsonPromise = null;
+    let geographicHeatLayer = null;
+    let lastRenderSignature = null;
+    let renderDebounceTimer = null;
+    const densityHeatGradient = {
+        0.2: '#22c55e',
+        0.5: '#facc15',
+        0.75: '#f97316',
+        1: '#dc2626'
+    };
+
+    const map = L.map('map', {
+        scrollWheelZoom: true,
+        minZoom: 2,
+        maxZoom: 18,
+        preferCanvas: true,
+        worldCopyJump: true
+    }).setView(indiaCenter, 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    function getIntensityColor(value, maxValue) {
+        if (value === null || value === undefined || Number.isNaN(value)) {
+            return '#e0e0e0';
+        }
+        if (maxValue <= 0) {
+            return '#28a745';
+        }
+        const ratio = value / maxValue;
+        if (ratio < 0.25) return '#28a745';
+        if (ratio < 0.5) return '#f5c542';
+        if (ratio < 0.75) return '#ff8c00';
+        return '#d62728';
+    }
+
+    function normalizeGeoState(stateName) {
+        const mapped = stateNameMap[stateName];
+        return mapped || stateName;
+    }
+
+    function getFeatureStateName(feature) {
+        if (!feature || !feature.properties) {
+            return '';
+        }
+        if (feature.properties._stateKey) {
+            return feature.properties._stateKey;
+        }
+        return (feature.properties.NAME_1 || feature.properties.name || feature.properties.NAME || '').trim();
+    }
+
+    function getStateCrimeDetail(stateName, selectedCrime, selectedYear) {
+        const normalizedState = normalizeGeoState(stateName || '');
+        const item = rawData.find(d => d.crime === selectedCrime && d.year === selectedYear && normalizeGeoState(d.geo_state) === normalizedState);
+        const value = item ? Number(item.value || 0) : null;
+        const crimeName = crimeLabels[selectedCrime] || selectedCrime;
+        const detail = value === null || Number.isNaN(value)
+            ? 'No reported data for the selected filter.'
+            : `${crimeName}: ${value}`;
+
+        return {
+            stateName: normalizedState,
+            value,
+            detail,
+            crimeName
+        };
+    }
+
+    function buildStateLookup() {
+        const lookup = {};
+        rawData.forEach(item => {
+            const stateKey = normalizeGeoState(item.geo_state || '');
+            if (!stateKey) {
+                return;
+            }
+            lookup[stateKey] = lookup[stateKey] || {};
+            lookup[stateKey][String(item.year)] = lookup[stateKey][String(item.year)] || {};
+            lookup[stateKey][String(item.year)][item.crime] = Number(item.value || 0);
+        });
+        return lookup;
+    }
+
+    function clearUserLocationMarker() {
+        if (userLocationMarker) {
+            locationMarkerLayer.removeLayer(userLocationMarker);
+            userLocationMarker = null;
+        }
+    }
+
+    function ensureDensityHeatLayer() {
+        if (!window.L || typeof L.heatLayer !== 'function') {
+            return null;
+        }
+        if (!geographicHeatLayer) {
+            geographicHeatLayer = L.heatLayer([], {
+                radius: 25,
+                blur: 18,
+                maxZoom: 18,
+                minOpacity: 0.12,
+                gradient: densityHeatGradient
+            }).addTo(map);
+        }
+        return geographicHeatLayer;
+    }
+
+    function setHeatmapNotice(message) {
+        const el = document.getElementById('heatmapNotice');
+        if (!el) {
+            return;
+        }
+        el.textContent = message || '';
+    }
+
+    function updateDensityHeatLayer(points) {
+        const heatLayer = ensureDensityHeatLayer();
+        if (!heatLayer) {
+            return;
+        }
+
+        if (!points || !points.length) {
+            heatLayer.setLatLngs([]);
+            return;
+        }
+
+        heatLayer.setLatLngs(points.map(point => [
+            Number(point.latitude),
+            Number(point.longitude),
+            Number(point.intensity || 0.5)
+        ]));
+    }
+
+    function getDistrictDensityPoints(selectedCrime, selectedYear) {
+        if (!Array.isArray(districtData) || !districtData.length) {
+            return [];
+        }
+
+        const filtered = districtData.filter(item => item.crime === selectedCrime && Number(item.year) === Number(selectedYear));
+        if (!filtered.length) {
+            return [];
+        }
+
+        const maxValue = Math.max(...filtered.map(item => Number(item.value || 0)), 1);
+        return filtered.map((item, index) => {
+            const stateKey = normalizeGeoState(item.state || '');
+            const basePoint = stateCentroidMap[stateKey] || [22.5, 78.96];
+            const localBiasLat = ((index % 5) - 2) * 0.20;
+            const localBiasLng = ((index % 7) - 3) * 0.28;
+            const value = Number(item.value || 0);
+            return {
+                latitude: basePoint[0] + localBiasLat,
+                longitude: basePoint[1] + localBiasLng,
+                intensity: Math.min(1, (value / maxValue) * 1.15)
+            };
+        });
+    }
+
+    function pointInPolygon(point, polygon) {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i][0], yi = polygon[i][1];
+            const xj = polygon[j][0], yj = polygon[j][1];
+            const intersect = ((yi > point[1]) !== (yj > point[1])) &&
+                (point[0] < (xj - xi) * (point[1] - yi) / (yj - yi + Number.EPSILON) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    function findStateByCoordinates(lat, lng) {
+        if (!indiaGeoJson || !indiaGeoJson.features) {
+            return null;
+        }
+
+        for (const feature of indiaGeoJson.features) {
+            const geometry = feature && feature.geometry;
+            if (!geometry || !geometry.coordinates) {
+                continue;
+            }
+
+            const name = (feature.properties && (feature.properties.NAME_1 || feature.properties.name || feature.properties.NAME)) || '';
+            const coordinates = geometry.coordinates;
+
+            function collectRings(value) {
+                if (!Array.isArray(value)) {
+                    return [];
+                }
+
+                const rings = [];
+                if (value.length > 0 && Array.isArray(value[0]) && value[0].length >= 2 && typeof value[0][0] === 'number' && typeof value[0][1] === 'number') {
+                    rings.push(value);
+                    return rings;
+                }
+
+                for (const child of value) {
+                    rings.push(...collectRings(child));
+                }
+                return rings;
+            }
+
+            const rings = collectRings(coordinates);
+            for (const ring of rings) {
+                if (ring.length && Array.isArray(ring[0]) && ring[0].length >= 2 && pointInPolygon([lng, lat], ring)) {
+                    return name;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function showLocationStatus(message, isError) {
+        locationStatus.textContent = message;
+        locationStatus.style.color = isError ? '#9b1c1c' : '#123';
+    }
+
+    function applyUserLocation(lat, lng, isAutoRequest) {
+        clearUserLocationMarker();
+
+        userLocationMarker = L.circleMarker([lat, lng], {
+            radius: 8,
+            color: '#0b57d0',
+            fillColor: '#0b57d0',
+            fillOpacity: 1,
+            weight: 2
+        }).addTo(map);
+
+        const tooltip = L.tooltip({ permanent: true, direction: 'top' })
+            .setContent('📍 You are here');
+        userLocationMarker.bindTooltip(tooltip).openTooltip();
+
+        map.addLayer(locationMarkerLayer);
+        locationMarkerLayer.addLayer(userLocationMarker);
+
+        const localZoom = 12;
+        map.setView([lat, lng], localZoom, { animate: true });
+
+        loadIndiaGeoJson().then(() => {
+            const stateName = findStateByCoordinates(lat, lng);
+            const selectedCrime = crimeSelect.value;
+            const selectedYear = Number(yearSelect.value);
+            if (stateName) {
+                const crimeValue = rawData.find(item =>
+                    normalizeGeoState(item.geo_state) === normalizeGeoState(stateName) &&
+                    item.crime === selectedCrime &&
+                    item.year === selectedYear
+                );
+                const crimeText = crimeValue
+                    ? `${crimeLabels[selectedCrime] || selectedCrime}: ${crimeValue.value}`
+                    : 'No reported data for the selected filter.';
+                stateInfo.innerHTML = `<span class="info-tag">Current Area</span> <b>${stateName}</b> — ${crimeText} — Year ${selectedYear}`;
+                showLocationStatus(
+                    isAutoRequest ? `📍 Auto-location: ${stateName}` : `📍 Your location — ${stateName}`,
+                    false
+                );
+            } else {
+                stateInfo.innerHTML = `<span class="info-tag">Current Area</span> User location received. Map centered on your current position. State-level crime data is shown only when a matching state boundary is available.`;
+                showLocationStatus(isAutoRequest ? '📍 Auto-location detected' : '📍 Your location', false);
+            }
+        });
+    }
+
+    function handleUseMyLocation() {
+        if (!navigator.geolocation) {
+            showLocationStatus('Location is not supported in this browser.', true);
+            return;
+        }
+
+        showLocationStatus('Requesting your location...', false);
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                applyUserLocation(lat, lng, false);
+            },
+            function(error) {
+                if (error.code === 1) {
+                    showLocationStatus('Location permission is required to show your current area.', true);
+                } else if (error.code === 2) {
+                    showLocationStatus('Location is unavailable right now. Please try again.', true);
+                } else if (error.code === 3) {
+                    showLocationStatus('Location request timed out. Please try again.', true);
+                } else {
+                    showLocationStatus('Unable to get your current location.', true);
+                }
+            },
+            {
+                enableHighAccuracy: false,
+                timeout: 10000,
+                maximumAge: 600000
+            }
+        );
+    }
+
+    function requestUserLocationOnLoad() {
+        if (!navigator.geolocation) {
+            return;
+        }
+
+        showLocationStatus('Detecting your location...', false);
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                applyUserLocation(lat, lng, true);
+            },
+            function(error) {
+                if (error.code === 1) {
+                    showLocationStatus('Location permission denied. Showing the default heatmap view.', true);
+                } else if (error.code === 2) {
+                    showLocationStatus('Location unavailable. Showing the default heatmap view.', true);
+                } else if (error.code === 3) {
+                    showLocationStatus('Location timed out. Showing the default heatmap view.', true);
+                } else {
+                    showLocationStatus('Location request failed. Showing the default heatmap view.', true);
+                }
+            },
+            {
+                enableHighAccuracy: false,
+                timeout: 10000,
+                maximumAge: 600000
+            }
+        );
+    }
+
+    function getVisibleLongitudeOffsets() {
+        const bounds = map.getBounds();
+        const west = bounds.getWest();
+        const east = bounds.getEast();
+        const worldWidth = 360;
+        const minOffset = Math.floor((west + 180) / worldWidth) * worldWidth - worldWidth;
+        const maxOffset = Math.ceil((east + 180) / worldWidth) * worldWidth + worldWidth;
+        const offsets = [];
+
+        for (let offset = minOffset; offset <= maxOffset; offset += worldWidth) {
+            offsets.push(offset);
+        }
+
+        return offsets.length ? offsets : [0];
+    }
+
+    function shiftCoordinatesWithOffset(value, offset) {
+        if (Array.isArray(value)) {
+            if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+                return [value[0] + offset, value[1], ...value.slice(2)];
+            }
+            return value.map(item => shiftCoordinatesWithOffset(item, offset));
+        }
+
+        if (value && typeof value === 'object') {
+            const copied = {};
+            Object.keys(value).forEach(key => {
+                copied[key] = shiftCoordinatesWithOffset(value[key], offset);
+            });
+            return copied;
+        }
+
+        return value;
+    }
+
+    function buildWrappedGeoJson(geojson) {
+        const offsets = getVisibleLongitudeOffsets();
+        return offsets.map(offset => {
+            const features = geojson.features.map(feature => {
+                const stateKey = getFeatureStateName(feature) || (feature.properties && (feature.properties.NAME_1 || feature.properties.name || feature.properties.NAME)) || 'Unknown state';
+                const clonedFeature = {
+                    ...feature,
+                    properties: feature.properties ? { ...feature.properties } : {}
+                };
+                clonedFeature.properties._stateKey = normalizeGeoState(stateKey);
+                clonedFeature.geometry = feature.geometry ? {
+                    ...feature.geometry,
+                    coordinates: shiftCoordinatesWithOffset(feature.geometry.coordinates, offset)
+                } : feature.geometry;
+                return clonedFeature;
+            });
+            return { ...geojson, features };
+        });
+    }
+
+    function removeGeoLayers() {
+        if (!map.geoLayers || !map.geoLayers.length) {
+            return;
+        }
+
+        map.geoLayers.forEach(layer => {
+            if (map.hasLayer(layer)) {
+                map.removeLayer(layer);
+            }
+        });
+        map.geoLayers = [];
+    }
+
+    function loadIndiaGeoJson() {
+        if (indiaGeoJson) {
+            return Promise.resolve(indiaGeoJson);
+        }
+
+        if (!indiaGeoJsonPromise) {
+            indiaGeoJsonPromise = fetch(INDIA_GEOJSON_URL)
+                .then(response => response.json())
+                .then(data => {
+                    indiaGeoJson = data;
+                    return data;
+                });
+        }
+
+        return indiaGeoJsonPromise;
+    }
+
+    function renderMap() {
+        const selectedCrime = crimeSelect.value;
+        const selectedYear = Number(yearSelect.value);
+        const filtered = rawData.filter(d => d.crime === selectedCrime && d.year === selectedYear);
+        const maxValue = filtered.length ? Math.max(...filtered.map(d => Number(d.value || 0))) : 0;
+
+        ensureDensityHeatLayer();
+
+        const districtPoints = getDistrictDensityPoints(selectedCrime, selectedYear);
+        if (districtPoints.length) {
+            updateDensityHeatLayer(districtPoints);
+            setHeatmapNotice(`District crime density layer is active for ${selectedYear} using the district dataset.`);
+        } else {
+            updateDensityHeatLayer([]);
+            setHeatmapNotice('Nearby crime density layer is ready when geographic incident data is available.');
+        }
+
+        const dataByState = {};
+        filtered.forEach(item => {
+            const geoState = normalizeGeoState(item.geo_state);
+            dataByState[geoState] = Number(item.value || 0);
+        });
+        const lookupByState = buildStateLookup();
+
+        const signature = `${selectedCrime}|${selectedYear}|${map.getZoom()}|${getVisibleLongitudeOffsets().join(',')}`;
+        if (lastRenderSignature === signature && map.geoLayers && map.geoLayers.length) {
+            return;
+        }
+        lastRenderSignature = signature;
+
+        removeGeoLayers();
+
+        loadIndiaGeoJson()
+            .then(geojson => {
+                const wrappedGeoJsons = buildWrappedGeoJson(geojson);
+                map.geoLayers = wrappedGeoJsons.map(wrappedGeoJson => {
+                    return L.geoJSON(wrappedGeoJson, {
+                        renderer: L.canvas(),
+                        style: function(feature) {
+                            const name = feature.properties.NAME_1 || feature.properties.name || feature.properties.NAME || '';
+                            const value = dataByState[name] ?? null;
+                            return {
+                                fillColor: getIntensityColor(value, maxValue),
+                                weight: 1,
+                                opacity: 1,
+                                color: '#ffffff',
+                                fillOpacity: 0.85
+                            };
+                        },
+                        onEachFeature: function(feature, layer) {
+                            const name = getFeatureStateName(feature) || 'Unknown state';
+                            const detailInfo = getStateCrimeDetail(name, selectedCrime, selectedYear);
+                            const displayName = detailInfo.stateName || name;
+                            const detail = detailInfo.detail;
+                            const stateValue = detailInfo.value;
+
+                            layer.bindPopup(`<b>${displayName}</b><br>${detail}<br>Year: ${selectedYear}`);
+                            layer.on('click', function() {
+                                const resolved = lookupByState[displayName] && lookupByState[displayName][String(selectedYear)]
+                                    ? lookupByState[displayName][String(selectedYear)][selectedCrime]
+                                    : null;
+                                const resolvedDetail = resolved === null || resolved === undefined || Number.isNaN(resolved)
+                                    ? 'No reported data for the selected filter.'
+                                    : `${crimeLabels[selectedCrime] || selectedCrime}: ${resolved}`;
+
+                                stateInfo.innerHTML = `<span class="info-tag">State details:</span> <b>${displayName}</b> — ${resolvedDetail} — Year ${selectedYear}`;
+                            });
+                        }
+                    }).addTo(map);
+                });
+            })
+            .catch(() => {
+                stateInfo.innerHTML = '<span class="info-tag">State details:</span> Map data could not be loaded. Please check the server connection.';
+            });
+    }
+
+    function scheduleRender() {
+        clearTimeout(renderDebounceTimer);
+        renderDebounceTimer = setTimeout(() => {
+            renderMap();
+        }, 120);
+    }
+
+    crimeOptions.forEach(option => {
+        const opt = document.createElement('option');
+        opt.value = option;
+        opt.textContent = crimeLabels[option] || option;
+        crimeSelect.appendChild(opt);
+    });
+
+    yearOptions.forEach(option => {
+        const opt = document.createElement('option');
+        opt.value = option;
+        opt.textContent = option;
+        yearSelect.appendChild(opt);
+    });
+
+    const defaultYear = yearOptions.includes('2013') ? '2013' : (yearOptions[yearOptions.length - 1] || yearOptions[0]);
+    if (defaultYear) {
+        yearSelect.value = String(defaultYear);
+    }
+
+    crimeSelect.addEventListener('change', scheduleRender);
+    yearSelect.addEventListener('change', scheduleRender);
+    map.on('moveend zoomend', scheduleRender);
+    useMyLocationBtn.addEventListener('click', handleUseMyLocation);
+
+    ensureDensityHeatLayer();
+    renderMap();
+    setTimeout(requestUserLocationOnLoad, 250);
+</script>
+</body>
+</html>

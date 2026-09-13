@@ -2,93 +2,382 @@
 <html>
 <head>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<title>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</title>
+<title>SOS Emergency Activation</title>
 <meta name="keywords" content="" />
-<meta name="Premium Series" content="" />
 <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
-<script language="javascript">
-	function validate(formObj)
-	{
-	if(formObj.t1.value.length==0)
-	{
-	alert("Please enter area name");
-	formObj.t1.focus();
-	return false;
-	}
-	return true;
-	}	
-	</script>
 <style>
 body {
   background-image: url("{% static 'images/back.jpg' %}");
 }
+.card {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0 20px 20px;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+#page.panic-page #content {
+  float: none;
+  width: auto;
+}
+.status-box {
+  background: #fff3f3;
+  border: 1px solid #f2b5b5;
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 18px;
+}
+.status-box.active-status {
+  background: #fffaf3;
+  border-color: #f0c66d;
+}
+.warning {
+  color: #b30000;
+  font-weight: bold;
+}
+button, input[type="submit"] {
+  background: #c40000;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-weight: bold;
+  cursor: pointer;
+}
+button.secondary {
+  background: #4c4c4c;
+}
+button.safe {
+  background: #0f8f4d;
+}
+button.cancel-sos {
+  background: #4c4c4c;
+  display: none;
+  margin: 12px auto;
+}
+button.emergency {
+  background: #c40000;
+  width: 170px;
+  height: 170px;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 28px auto;
+  padding: 18px;
+  border-radius: 50%;
+  font-size: 24px;
+  font-weight: bold;
+  line-height: 1.1;
+  box-shadow: 0 4px 0 #8f0000;
+}
+.sos-icon {
+  font-size: 34px;
+  line-height: 1;
+}
+.countdown-number {
+  font-size: 52px;
+  line-height: 1;
+}
+#countdown {
+  display: none !important;
+}
+.small-note {
+  color: #555;
+  font-size: 14px;
+}
+.section-divider {
+  border: 0;
+  border-top: 1px solid #d9d9d9;
+  margin: 24px 0;
+}
+.contacts-header {
+  overflow: hidden;
+}
+.contacts-header h2 {
+  float: left;
+  margin-bottom: 8px;
+}
+.contacts-actions {
+  float: right;
+  margin-top: 4px;
+}
+.contacts-actions a,
+.contacts-actions button,
+.quick-add-form button {
+  display: inline-block;
+  margin: 4px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-weight: bold;
+  text-decoration: none;
+}
+.contacts-actions a {
+  background: #777;
+  color: #fff;
+}
+.contacts-actions button {
+  background: #a00000;
+}
+.quick-add-form {
+  display: none;
+  clear: both;
+  margin: 12px 0 18px;
+  padding: 16px;
+  border: 1px solid #ddd;
+  background: #fafafa;
+}
+.quick-add-form label {
+  display: inline-block;
+  width: 150px;
+  margin: 6px 8px 6px 0;
+  font-weight: bold;
+}
+.quick-add-form input[type="text"],
+.quick-add-form input[type="tel"],
+.quick-add-form input[type="email"] {
+  width: 260px;
+  max-width: 100%;
+  padding: 7px;
+}
+.quick-add-form .form-actions {
+  margin-top: 8px;
+}
+.quick-add-form .cancel-quick-add {
+  background: #777;
+}
+.contact-list {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 8px;
+}
+.contact-list th,
+.contact-list td {
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+  text-align: left;
+}
+.contact-list th {
+  color: #8c0209;
+}
+@media (max-width: 700px) {
+  .contacts-header h2,
+  .contacts-actions {
+    float: none;
+  }
+  .quick-add-form label {
+    display: block;
+  }
+}
 </style>
 </head>
 <body>
-<!-- start header -->
 <div id="header">
-	<div id="logo">
-		<h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font>
-
-</center></span></h1>
-		
-	</div>
-	<div id="menu">
-		<ul>      
-     <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</a></li>
-	 <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</a></li>
-	 <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</a></li>
-	 <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</a></li>
-	 <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</a></li>
-	 <li><a href="{% url 'index' %}"><font size="3" color="white">Logout</a></li>
-   </ul>       
-		
-	</div>
-	
+  <div id="logo">
+    <h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1>
+  </div>
+  <div id="menu">
+    <ul>
+      <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
+      <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
+      <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
+      <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
+      <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
+      <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
+    </ul>
+  </div>
 </div>
 
 <div id="wrapper">
-	<!-- start page -->
-	<div id="page">
-		 
-		<!-- start content -->
-		<div id="content">
-		<div class="flower"><img src="{% static 'images/tra.jpg' %}" alt="" width="800" height="200" /></center></div>
-			<br/><br/>
-			<div class="flower"><center><h1>
-			<font size="" align="center">
-			Panic Reporting Page</font><h1></div>
-			
-		
-			<center><font face="verdana" color="blue">{{ data|safe }}</center></font>
-		<br/>
-			<table align="center">
-			<form name="f1" method="post" action="{% url 'PanicAction' %}" OnSubmit="return validate(this)">
-	{% csrf_token %}
-<tr><td><font size="3" color="black">Area&nbsp;Name</td><td><input type="text" name="t1" size="80"/></td></tr>
+  <div id="page" class="panic-page">
+    <div id="content">
+      <div class="card">
+        <h2>🚨 Panic / Emergency SOS</h2>
+        <p class="small-note">If you are in immediate danger, activate SOS to alert your configured emergency contacts.</p>
 
+        {% if active_event %}
+          <div class="status-box active-status">
+            <p><strong>Status:</strong> <span class="warning">SOS Active</span></p>
+            <p><strong>Activated:</strong> {{ active_event.activated_at }}</p>
+            {% if active_event.latitude and active_event.longitude %}
+              <p><strong>Location:</strong> {{ active_event.latitude }}, {{ active_event.longitude }}</p>
+              <p><a href="https://www.google.com/maps?q={{ active_event.latitude }},{{ active_event.longitude }}" target="_blank">View location on Google Maps</a></p>
+            {% else %}
+              <p><strong>Location:</strong> Browser location unavailable at activation time.</p>
+            {% endif %}
+            <p class="small-note">{{ emergency_contact_count }} emergency contact(s) are configured for this account.</p>
 
+            <div class="status-box" style="background:#fffaf3; border-color:#d9d9d9; margin-top:12px; margin-bottom:10px;">
+              <strong>Emergency alerts:</strong><br />
+              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) sent</span><br />
+              <span style="color:#b30000;">✗ {{ delivery_summary.failed }} email(s) failed</span><br />
+              <span style="color:#8a6d1d;">⚠ {{ delivery_summary.no_email }} contact(s) have no email</span>
+              {% if delivery_summary.pending %}
+                <br /><span style="color:#555;">⏳ {{ delivery_summary.pending }} email(s) pending</span>
+              {% endif %}
+            </div>
 
-</td></tr>
-<tr><td></td><td><input type="submit" value="Submit"></td>
-</td></tr></table>
-</form>
-			</table>
-			</center><br /><div class="post">
-				
-				<div class="entry">
-					
-				</div>
-			</div>
-		</div>
-		<!-- end content -->
-		<!-- start sidebars -->
-		
-		<!-- end sidebars -->
-		<div style="clear: both;">&nbsp;</div>
-	</div>
-	<!-- end page -->
+            <form method="post" action="{% url 'UpdateSOSStatus' %}">
+              {% csrf_token %}
+              <input type="hidden" name="status" value="RESOLVED" />
+              <button class="safe" type="submit">I Am Safe</button>
+            </form>
+          </div>
+        {% else %}
+          <p>Press the button below to activate the SOS sequence. A 3-second countdown will begin, and you can cancel before activation finishes.</p>
+          <div id="countdown" style="display:none;">3</div>
+
+          <form id="sosForm" method="post" action="{% url 'ActivateSOS' %}">
+            {% csrf_token %}
+            <input type="hidden" name="latitude" id="latitude" value="" />
+            <input type="hidden" name="longitude" id="longitude" value="" />
+            <button id="activateButton" class="emergency" type="submit"><span class="sos-icon">🚨</span><span>SOS</span></button>
+            <button id="cancelButton" class="cancel-sos" type="button">Cancel SOS</button>
+          </form>
+
+          <p class="small-note">You can activate SOS only once at a time. Existing active emergency contacts are counted but not notified.</p>
+        {% endif %}
+
+        <hr class="section-divider" />
+        <div class="contacts-header">
+          <h2>👥 Emergency Contacts</h2>
+          <div class="contacts-actions">
+            <button id="showQuickAdd" type="button">+ Add Emergency Contact</button>
+            <a href="{% url 'EmergencyContacts' %}">Manage All Contacts</a>
+          </div>
+        </div>
+        <p>Active contacts: {{ emergency_contact_count }}</p>
+        <p>Contacts with email: {{ email_contact_count }}</p>
+
+        {% if active_contacts %}
+          <table class="contact-list">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Relationship</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Primary</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for contact in active_contacts %}
+                <tr>
+                  <td>{{ contact.name }}</td>
+                  <td>{{ contact.relationship|default:"-" }}</td>
+                  <td>{{ contact.phone_number }}</td>
+                  <td>{{ contact.email|default:"-" }}</td>
+                  <td>{% if contact.is_primary %}Yes{% else %}No{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="warning">No active emergency contacts are configured.</p>
+        {% endif %}
+
+        <form id="quickAddForm" class="quick-add-form" method="post" action="{% url 'EmergencyContactAdd' %}">
+          {% csrf_token %}
+          <input type="hidden" name="return_to" value="Panic" />
+          <h3>Add Emergency Contact</h3>
+          <div><label for="quickName">Full Name</label><input id="quickName" type="text" name="name" required /></div>
+          <div><label for="quickRelationship">Relationship</label><input id="quickRelationship" type="text" name="relationship" /></div>
+          <div><label for="quickPhone">Phone Number</label><input id="quickPhone" type="tel" name="phone_number" required /></div>
+          <div><label for="quickEmail">Email</label><input id="quickEmail" type="email" name="email" /></div>
+          <div><label for="quickPrimary">Primary Contact</label><input id="quickPrimary" type="checkbox" name="is_primary" /></div>
+          <div class="form-actions">
+            <button type="submit">Save Contact</button>
+            <button class="cancel-quick-add" id="cancelQuickAdd" type="button">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
+
+<script>
+  (function() {
+    const showQuickAdd = document.getElementById('showQuickAdd');
+    const quickAddForm = document.getElementById('quickAddForm');
+    const cancelQuickAdd = document.getElementById('cancelQuickAdd');
+    if (!showQuickAdd || !quickAddForm || !cancelQuickAdd) return;
+
+    showQuickAdd.addEventListener('click', function() {
+      quickAddForm.style.display = 'block';
+      showQuickAdd.style.display = 'none';
+      document.getElementById('quickName').focus();
+    });
+
+    cancelQuickAdd.addEventListener('click', function() {
+      quickAddForm.reset();
+      quickAddForm.style.display = 'none';
+      showQuickAdd.style.display = 'inline-block';
+    });
+  })();
+
+  (function() {
+    const form = document.getElementById('sosForm');
+    if (!form) return;
+
+    const countdownEl = document.getElementById('countdown');
+    const activateButton = document.getElementById('activateButton');
+    const cancelButton = document.getElementById('cancelButton');
+    const defaultButtonMarkup = '<span class="sos-icon">🚨</span><span>SOS</span>';
+    let timer = null;
+
+    function gatherLocation() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function(position) {
+          document.getElementById('latitude').value = position.coords.latitude;
+          document.getElementById('longitude').value = position.coords.longitude;
+        }, function() {
+          document.getElementById('latitude').value = '';
+          document.getElementById('longitude').value = '';
+        }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+      }
+    }
+
+    activateButton.addEventListener('click', function(event) {
+      event.preventDefault();
+      activateButton.disabled = true;
+      cancelButton.style.display = 'block';
+      gatherLocation();
+
+      let seconds = 3;
+      countdownEl.style.display = 'block';
+      countdownEl.textContent = seconds;
+      activateButton.innerHTML = '<span class="countdown-number">' + seconds + '</span>';
+
+      timer = setInterval(function() {
+        seconds -= 1;
+        countdownEl.textContent = seconds;
+        activateButton.innerHTML = '<span class="countdown-number">' + seconds + '</span>';
+        if (seconds <= 0) {
+          clearInterval(timer);
+          timer = null;
+          form.submit();
+        }
+      }, 1000);
+    });
+
+    cancelButton.addEventListener('click', function() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      countdownEl.style.display = 'none';
+      countdownEl.textContent = '3';
+      activateButton.innerHTML = defaultButtonMarkup;
+      cancelButton.style.display = 'none';
+      activateButton.disabled = false;
+    });
+  })();
+</script>
 </body>
 </html>
 

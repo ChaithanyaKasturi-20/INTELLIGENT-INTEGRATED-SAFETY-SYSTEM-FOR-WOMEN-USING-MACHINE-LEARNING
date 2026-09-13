@@ -1,0 +1,172 @@
+{% load static %}
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<title>SOS Emergency Activation</title>
+<meta name="keywords" content="" />
+<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+<style>
+body {
+  background-image: url("{% static 'images/back.jpg' %}");
+}
+.card {
+  max-width: 760px;
+  margin: 40px auto;
+  padding: 28px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+}
+.status-box {
+  background: #fff3f3;
+  border: 1px solid #f2b5b5;
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 18px;
+}
+.warning {
+  color: #b30000;
+  font-weight: bold;
+}
+button, input[type="submit"] {
+  background: #c40000;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-weight: bold;
+  cursor: pointer;
+}
+button.secondary {
+  background: #4c4c4c;
+}
+button.safe {
+  background: #0f8f4d;
+}
+#countdown {
+  font-size: 40px;
+  font-weight: bold;
+  color: #b30000;
+  margin: 12px 0;
+}
+.small-note {
+  color: #555;
+  font-size: 14px;
+}
+</style>
+</head>
+<body>
+<div id="header">
+  <div id="logo">
+    <h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1>
+  </div>
+  <div id="menu">
+    <ul>
+      <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
+      <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
+      <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
+      <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
+      <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
+      <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
+    </ul>
+  </div>
+</div>
+
+<div id="wrapper">
+  <div id="page">
+    <div id="content">
+      <div class="card">
+        <h2>Emergency SOS</h2>
+        <p class="small-note">If you are in immediate danger, activate SOS to alert your configured emergency contacts.</p>
+
+        {% if active_event %}
+          <div class="status-box">
+            <p><strong>Status:</strong> <span class="warning">SOS Active</span></p>
+            <p><strong>Activated:</strong> {{ active_event.activated_at }}</p>
+            {% if active_event.latitude and active_event.longitude %}
+              <p><strong>Location:</strong> {{ active_event.latitude }}, {{ active_event.longitude }}</p>
+            {% else %}
+              <p><strong>Location:</strong> Browser location unavailable at activation time.</p>
+            {% endif %}
+            <p class="small-note">{{ emergency_contact_count }} emergency contact(s) are configured for this account.</p>
+
+            <div class="status-box" style="background:#fff; border-color:#d9d9d9; margin-top:12px; margin-bottom:10px;">
+              <strong>Emergency alerts:</strong><br />
+              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) sent</span><br />
+              <span style="color:#b30000;">✗ {{ delivery_summary.failed }} email(s) failed</span><br />
+              <span style="color:#8a6d1d;">⚠ {{ delivery_summary.no_email }} contact(s) have no email</span>
+              {% if delivery_summary.pending %}
+                <br /><span style="color:#555;">⏳ {{ delivery_summary.pending }} email(s) pending</span>
+              {% endif %}
+            </div>
+
+            <form method="post" action="{% url 'UpdateSOSStatus' %}">
+              {% csrf_token %}
+              <input type="hidden" name="status" value="CANCELLED" />
+              <button class="secondary" type="submit">Cancel SOS</button>
+            </form>
+            <br />
+            <form method="post" action="{% url 'UpdateSOSStatus' %}">
+              {% csrf_token %}
+              <input type="hidden" name="status" value="RESOLVED" />
+              <button class="safe" type="submit">I Am Safe</button>
+            </form>
+          </div>
+        {% else %}
+          <p>Press the button below to activate the SOS sequence. A 3-second countdown will begin, and you can cancel before activation finishes.</p>
+          <div id="countdown" style="display:none;">3</div>
+          <form id="sosForm" method="post" action="{% url 'ActivateSOS' %}">
+            {% csrf_token %}
+            <input type="hidden" name="latitude" id="latitude" value="" />
+            <input type="hidden" name="longitude" id="longitude" value="" />
+            <button id="activateButton" type="submit">Activate SOS</button>
+          </form>
+          <p class="small-note">You can activate SOS only once at a time. Existing active emergency contacts are counted but not notified.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    const form = document.getElementById('sosForm');
+    if (!form) return;
+
+    const countdownEl = document.getElementById('countdown');
+    const activateButton = document.getElementById('activateButton');
+
+    function gatherLocation() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function(position) {
+          document.getElementById('latitude').value = position.coords.latitude;
+          document.getElementById('longitude').value = position.coords.longitude;
+        }, function() {
+          document.getElementById('latitude').value = '';
+          document.getElementById('longitude').value = '';
+        }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+      }
+    }
+
+    activateButton.addEventListener('click', function(event) {
+      event.preventDefault();
+      activateButton.disabled = true;
+      gatherLocation();
+
+      let seconds = 3;
+      countdownEl.style.display = 'block';
+      countdownEl.textContent = seconds;
+
+      const timer = setInterval(function() {
+        seconds -= 1;
+        countdownEl.textContent = seconds;
+        if (seconds <= 0) {
+          clearInterval(timer);
+          form.submit();
+        }
+      }, 1000);
+    });
+  })();
+</script>
+</body>
+</html>

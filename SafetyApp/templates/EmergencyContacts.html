@@ -1,0 +1,143 @@
+{% load static %}
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<title>Emergency Contacts</title>
+<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+<style>
+body { background-image: url("{% static 'images/back.jpg' %}"); }
+.container { width: 100%; max-width: 1000px; margin: 20px auto; padding: 20px; }
+.contact-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 20px; }
+.contact-card {
+    background: rgba(255,255,255,0.9);
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 18px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+.contact-card h3 { margin-top: 0; }
+.meta { margin: 8px 0; color: #333; }
+.actions a, .actions button, .primary-btn, .cancel-btn {
+    display: inline-block;
+    margin: 4px 6px 0 0;
+    padding: 7px 12px;
+    border-radius: 6px;
+    border: 1px solid #bdbdbd;
+    background: #f5f5f5;
+    color: #111;
+    text-decoration: none;
+    cursor: pointer;
+    font-size: 13px;
+}
+.primary-btn { background: #f1d7d7; }
+.badge { display: inline-block; padding: 4px 8px; background: #e6f7e6; color: #1a5c1a; border-radius: 999px; font-size: 12px; margin-right: 8px; }
+.badge.inactive { background: #f3f3f3; color: #666; }
+.form-grid { background: rgba(255,255,255,0.9); padding: 18px; border-radius: 10px; max-width: 700px; }
+.form-grid table td { padding: 8px; }
+input[type=text], input[type=email], input[type=tel] { width: 100%; max-width: 320px; padding: 8px; }
+.checkbox-row { margin: 8px 0; }
+.error { color: #b30000; font-size: 13px; margin: 5px 0; }
+@media (max-width: 640px) { .container { padding: 10px; } .form-grid table, .form-grid table tbody, .form-grid table tr, .form-grid table td { display: block; width: 100%; } }
+</style>
+</head>
+<body>
+<div id="header">
+    <div id="logo">
+        <h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1>
+    </div>
+    <div id="menu">
+        <ul>
+            <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
+            <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
+            <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
+            <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
+            <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
+            <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
+        </ul>
+    </div>
+</div>
+
+<div class="container">
+    <h2>Emergency Contacts</h2>
+    <p><a href="#add-contact" class="primary-btn">+ Add Emergency Contact</a></p>
+
+    {% if form_errors %}
+        <div class="error">
+            {% for field, errors in form_errors.items %}
+                <div>{{ field }}: {{ errors|join:", " }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if show_form %}
+        <div id="add-contact" class="form-grid">
+            <h3>{% if edit_contact %}Edit Emergency Contact{% else %}Add Emergency Contact{% endif %}</h3>
+            <form method="post" action="{% if edit_contact %}{% url 'EmergencyContactEdit' edit_contact.id %}{% else %}{% url 'EmergencyContactAdd' %}{% endif %}">
+                {% csrf_token %}
+                <table>
+                    <tr>
+                        <td>Full Name</td>
+                        <td><input type="text" name="name" value="{{ form_data.name|default:edit_contact.name|default:'' }}" required /></td>
+                    </tr>
+                    <tr>
+                        <td>Phone Number</td>
+                        <td><input type="tel" name="phone_number" value="{{ form_data.phone_number|default:edit_contact.phone_number|default:'' }}" required /></td>
+                    </tr>
+                    <tr>
+                        <td>Email (optional)</td>
+                        <td><input type="email" name="email" value="{{ form_data.email|default:edit_contact.email|default:'' }}" /></td>
+                    </tr>
+                    <tr>
+                        <td>Relationship</td>
+                        <td><input type="text" name="relationship" value="{{ form_data.relationship|default:edit_contact.relationship|default:'' }}" /></td>
+                    </tr>
+                    <tr>
+                        <td colspan="2">
+                            <div class="checkbox-row">
+                                <input type="checkbox" name="is_primary" {% if form_data.is_primary or edit_contact.is_primary %}checked{% endif %}> Primary Contact
+                            </div>
+                            <div class="checkbox-row">
+                                <input type="checkbox" name="is_active" {% if form_data.is_active is not False and edit_contact.is_active != False %}checked{% endif %}> Active
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2">
+                            <button type="submit">Save Contact</button>
+                            <a href="{% url 'EmergencyContacts' %}" class="cancel-btn">Cancel</a>
+                        </td>
+                    </tr>
+                </table>
+            </form>
+        </div>
+    {% endif %}
+
+    <div class="contact-list">
+        {% for contact in contacts %}
+            <div class="contact-card">
+                <h3>{{ contact.name }}</h3>
+                {% if contact.is_primary %}<span class="badge">Primary</span>{% else %}<span class="badge inactive">Not Primary</span>{% endif %}
+                {% if contact.is_active %}<span class="badge">Active</span>{% else %}<span class="badge inactive">Disabled</span>{% endif %}
+                <div class="meta"><strong>Relationship:</strong> {{ contact.relationship|default:'Not specified' }}</div>
+                <div class="meta"><strong>Phone:</strong> {{ contact.phone_number }}</div>
+                {% if contact.email %}<div class="meta"><strong>Email:</strong> {{ contact.email }}</div>{% endif %}
+                <div class="actions">
+                    <a href="{% url 'EmergencyContactEdit' contact.id %}">Edit</a>
+                    <a href="{% url 'EmergencyContactDelete' contact.id %}">Delete</a>
+                    {% if not contact.is_primary %}
+                        <a href="{% url 'EmergencyContactSetPrimary' contact.id %}" class="primary-btn">Set as Primary</a>
+                    {% endif %}
+                    {% if contact.is_active %}
+                        <a href="{% url 'EmergencyContactToggleActive' contact.id %}">Disable</a>
+                    {% else %}
+                        <a href="{% url 'EmergencyContactToggleActive' contact.id %}">Enable</a>
+                    {% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <p>No emergency contacts added yet.</p>
+        {% endfor %}
+    </div>
+</div>
+</body>
+</html>
