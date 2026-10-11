@@ -113,24 +113,30 @@ img.right {
 	margin: 0;
 	padding: 0;
 	list-style: none;
+	display: flex;
+	flex-wrap: nowrap;
+	justify-content: center;
+	align-items: center;
+	gap: 18px;
 }
 
 #menu li {
-	display: inline;
+	display: inline-block;
 }
 
 #menu a {
-	display: block;
-	float: left;
+	display: inline-block;
+	float: none;
 	height: 32px;
 	margin: 0;
-	padding: 18px 30px 0 30px;
+	padding: 18px 12px 0 12px;
 	text-decoration: none;
 	text-transform: capitalize;
 	background: #8C0209 no-repeat right top;
 	font-family: Georgia, "Times New Roman", Times, serif;
 	font-size: 12px;
 	color: #FFFFFF;
+	white-space: nowrap;
 }
 
 #menu a:hover {
@@ -380,4 +386,181 @@ img.right {
 
 .flower {
 	padding-left: 80px;
+}
+
+*, *::before, *::after {
+	box-sizing: border-box;
+}
+
+html, body {
+	max-width: 100%;
+	overflow-x: hidden;
+}
+
+img, canvas, video, svg {
+	max-width: 100%;
+	height: auto;
+}
+
+input, select, textarea, button {
+	max-width: 100%;
+	font: inherit;
+}
+
+table {
+	max-width: 100%;
+}
+
+@media (max-width: 1024px) {
+	#header,
+	#logo,
+	#menu,
+	#page,
+	#content {
+		width: 100%;
+		max-width: 100%;
+	}
+
+	#header {
+		height: auto;
+	}
+
+	#logo {
+		height: auto;
+		min-height: 100px;
+		padding: 0 20px;
+	}
+
+	#logo h1 {
+		float: none;
+		padding: 24px 0 12px;
+		font-size: clamp(1.2rem, 3vw, 2em);
+		line-height: 1.25;
+		text-align: center;
+	}
+
+	#menu {
+		height: auto;
+		padding: 0 10px 10px;
+	}
+
+	#menu ul {
+		flex-wrap: wrap;
+		gap: 4px 8px;
+		justify-content: center;
+	}
+
+	#menu a {
+		height: auto;
+		padding: 10px 8px;
+		font-size: 12px;
+		line-height: 1.2;
+	}
+
+	#page {
+		padding: 16px clamp(10px, 3vw, 24px);
+	}
+
+	#content {
+		float: none;
+	}
+
+	.entry,
+	.title,
+	.flower {
+		padding-left: 0;
+		padding-right: 0;
+	}
+
+	.flower {
+		text-align: center;
+	}
+
+	#content form {
+		max-width: 100%;
+	}
+
+	#content input[type="text"],
+	#content input[type="password"],
+	#content input[type="email"],
+	#content input[type="tel"],
+	#content select,
+	#content textarea {
+		max-width: 100%;
+	}
+}
+
+@media (max-width: 640px) {
+	body {
+		margin-top: 0;
+		font-size: 13px;
+	}
+
+	h1 {
+		font-size: 1.35em;
+	}
+
+	h2 {
+		font-size: 1.3em;
+	}
+
+	#menu ul {
+		align-items: stretch;
+	}
+
+	#menu li {
+		flex: 1 1 calc(50% - 8px);
+		min-width: 140px;
+		text-align: center;
+	}
+
+	#menu a {
+		display: block;
+		min-height: 42px;
+		padding: 12px 6px;
+	}
+
+	#page {
+		padding: 12px 8px;
+	}
+
+	#content table:not(.contact-list) {
+		display: block;
+		width: 100%;
+		overflow-x: auto;
+	}
+
+	#content table:not(.contact-list) tbody,
+	#content table:not(.contact-list) tr,
+	#content table:not(.contact-list) td {
+		max-width: 100%;
+	}
+
+	#content table:not(.contact-list) tr,
+	#content table:not(.contact-list) td {
+		white-space: normal;
+	}
+
+	#content form table,
+	#content form table tbody,
+	#content form table tr,
+	#content form table td {
+		display: block;
+		width: 100%;
+	}
+
+	#content form table td {
+		padding: 6px 0;
+	}
+
+	#content input[type="submit"],
+	#content button {
+		min-height: 44px;
+	}
+
+	#footer {
+		width: 100%;
+		height: auto;
+		padding: 0 10px 20px;
+	}
 }

@@ -5,6 +5,17 @@ from django.db import models
 from django.utils import timezone
 
 
+def normalize_emergency_email(email_value):
+    cleaned_email = (email_value or '').strip()
+    if not cleaned_email:
+        return ''
+
+    lowered = cleaned_email.lower()
+    if 'example.com' in lowered or lowered.endswith('@example.com'):
+        return ''
+    return cleaned_email
+
+
 class EmergencyContact(models.Model):
     user = models.CharField(max_length=150, db_index=True)
     name = models.CharField(max_length=120)
@@ -35,7 +46,10 @@ class EmergencyContact(models.Model):
 
         cleaned_email = (self.email or '').strip()
         if cleaned_email:
-            if not re.fullmatch(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', cleaned_email):
+            normalized_email = normalize_emergency_email(cleaned_email)
+            if not normalized_email:
+                raise ValidationError({'email': 'Use a real email address for an emergency contact.'})
+            if not re.fullmatch(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', normalized_email):
                 raise ValidationError({'email': 'Enter a valid email address.'})
 
         cleaned_relationship = (self.relationship or '').strip()
@@ -135,3 +149,49 @@ class SOSEmailDelivery(models.Model):
 
     def __str__(self):
         return '{} -> {} ({})'.format(self.emergency_contact.name, self.status, self.sos_event_id)
+
+
+class SafetyTimer(models.Model):
+    STATUS_ACTIVE = 'ACTIVE'
+    STATUS_COMPLETED = 'COMPLETED'
+    STATUS_EXPIRED = 'EXPIRED'
+    STATUS_CANCELLED = 'CANCELLED'
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, 'ACTIVE'),
+        (STATUS_COMPLETED, 'COMPLETED'),
+        (STATUS_EXPIRED, 'EXPIRED'),
+        (STATUS_CANCELLED, 'CANCELLED'),
+    )
+
+    user = models.CharField(max_length=150, db_index=True)
+    started_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    duration = models.PositiveIntegerField(default=15)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-started_at']
+
+    def __str__(self):
+        return '{} ({})'.format(self.user, self.status)
+
+    def mark_completed(self):
+        if self.status in (self.STATUS_ACTIVE, self.STATUS_EXPIRED):
+            self.status = self.STATUS_COMPLETED
+            self.completed_at = timezone.now()
+            self.save(update_fields=['status', 'completed_at', 'updated_at'])
+
+    def mark_cancelled(self):
+        if self.status == self.STATUS_ACTIVE:
+            self.status = self.STATUS_CANCELLED
+            self.completed_at = timezone.now()
+            self.save(update_fields=['status', 'completed_at', 'updated_at'])
+
+    def mark_expired(self):
+        if self.status == self.STATUS_ACTIVE:
+            self.status = self.STATUS_EXPIRED
+            self.completed_at = timezone.now()
+            self.save(update_fields=['status', 'completed_at', 'updated_at'])

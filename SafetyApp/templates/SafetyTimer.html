@@ -1,0 +1,217 @@
+{% load static %}
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Safety Timer</title>
+<meta name="keywords" content="" />
+<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+<style>
+body {
+  background-image: url("{% static 'images/back.jpg' %}");
+}
+.card {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0 20px 20px;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+#page.panic-page #content {
+  float: none;
+  width: auto;
+}
+.timer-box {
+  background: #fff;
+  border: 1px solid #e0d7d7;
+  border-radius: 12px;
+  padding: 20px;
+  margin: 20px 0;
+  text-align: center;
+}
+.timer-duration {
+  display: inline-block;
+  margin: 8px;
+  padding: 12px 18px;
+  background: #f4f4f4;
+  border: 1px solid #d5d5d5;
+  border-radius: 8px;
+  font-weight: bold;
+}
+.countdown-number {
+  font-size: 52px;
+  line-height: 1;
+  font-weight: bold;
+  color: #8C0209;
+  letter-spacing: 2px;
+  margin: 18px 0;
+}
+button, input[type="submit"] {
+  background: #c40000;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-weight: bold;
+  cursor: pointer;
+}
+button.secondary {
+  background: #4c4c4c;
+}
+button.safe {
+  background: #0f8f4d;
+}
+.status-box {
+  background: #fff3f3;
+  border: 1px solid #f2b5b5;
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 18px;
+}
+.status-box.active-status {
+  background: #fffaf3;
+  border-color: #f0c66d;
+}
+.warning {
+  color: #b30000;
+  font-weight: bold;
+}
+.small-note {
+  color: #555;
+  font-size: 14px;
+}
+@media (max-width: 640px) {
+  .card { padding: 0 8px 16px; }
+  .timer-box, .status-box { padding: 14px; }
+  .timer-duration { display: block; margin: 8px 0; text-align: left; }
+  .timer-box button, .status-box button { width: 100%; min-height: 46px; }
+  .status-box form { display: block !important; margin: 8px 0 !important; }
+}
+</style>
+</head>
+<body>
+<div id="header">
+  <div id="logo">
+    <h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1>
+  </div>
+  <div id="menu">
+    <ul>
+      <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
+      <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
+      <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
+      <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
+      <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
+      <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
+    </ul>
+  </div>
+</div>
+
+<div id="wrapper">
+  <div id="page" class="panic-page">
+    <div id="content">
+      <div class="card">
+        {% if active_event %}
+          <div class="status-box active-status">
+            <p><strong>Status:</strong> <span class="warning">SOS Active</span></p>
+            <p><strong>Activated:</strong> {{ active_event.activated_at }}</p>
+            {% if active_event.latitude and active_event.longitude %}
+              <p><strong>Location:</strong> {{ active_event.latitude }}, {{ active_event.longitude }}</p>
+              <p><a href="https://www.google.com/maps?q={{ active_event.latitude }},{{ active_event.longitude }}" target="_blank">View location on Google Maps</a></p>
+            {% else %}
+              <p><strong>Location:</strong> Browser location unavailable at activation time.</p>
+            {% endif %}
+            <p><strong>{{ emergency_contact_count }} emergency contact(s) are configured for this account.</strong></p>
+
+            <div class="status-box" style="background:#fffaf3; border-color:#d9d9d9; margin-top:12px; margin-bottom:10px;">
+              <strong>Emergency alerts:</strong><br />
+              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) sent</span><br />
+              <span style="color:#b30000;">✗ {{ delivery_summary.failed }} email(s) failed</span><br />
+              <span style="color:#8a6d1d;">⚠ {{ delivery_summary.no_email }} contact(s) have no email</span>
+            </div>
+
+            <form method="post" action="{% url 'UpdateSOSStatus' %}" style="display: inline;">
+              {% csrf_token %}
+              <input type="hidden" name="status" value="RESOLVED" />
+              <input type="hidden" name="return_to" value="SafetyTimer" />
+              <button class="safe" type="submit">I Am Safe</button>
+            </form>
+          </div>
+        {% elif timer and timer.status == 'ACTIVE' %}
+          <div class="status-box active-status">
+            <p><strong>Status:</strong> <span class="warning">SAFETY TIMER ACTIVE</span></p>
+            <div id="countdownDisplay" class="countdown-number">00:00</div>
+            <p class="small-note">Expires: <span id="expiryDisplay">--</span></p>
+            <div style="margin-top: 20px;">
+              <form method="post" action="{% url 'SafetyTimerSafe' %}" style="display: inline;">
+                {% csrf_token %}
+                <button class="safe" type="submit">I'M SAFE</button>
+              </form>
+              <form method="post" action="{% url 'SafetyTimerCancel' %}" style="display: inline; margin-left: 12px;">
+                {% csrf_token %}
+                <button class="secondary" type="submit">CANCEL TIMER</button>
+              </form>
+            </div>
+          </div>
+        {% else %}
+          <div class="timer-box">
+            {% if timer %}
+              <div class="status-box active-status" style="margin-top: 0; margin-bottom: 12px;">
+                <p><strong>Status:</strong> <span class="warning">{{ timer.status }}</span></p>
+              </div>
+            {% endif %}
+            <p>Select a duration and start the timer when you are travelling alone or entering an unsafe area.</p>
+            <form method="post" action="{% url 'SafetyTimerAction' %}">
+              {% csrf_token %}
+              {% for option in duration_options %}
+                <label class="timer-duration">
+                  <input type="radio" name="duration" value="{{ option }}" {% if forloop.first %}checked{% endif %} />
+                  {{ option }} minutes
+                </label>
+              {% endfor %}
+              <div style="margin-top: 18px;">
+                <button type="submit">START SAFETY TIMER</button>
+              </div>
+            </form>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    const timerText = document.getElementById('countdownDisplay');
+    const expiryText = document.getElementById('expiryDisplay');
+    if (!timerText || !expiryText) return;
+
+    const expiresAtMs = Number('{{ timer.expires_at|date:"U" }}') * 1000;
+
+    function updateExpiryText() {
+      const localDate = new Date(expiresAtMs);
+      expiryText.textContent = localDate.toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+    }
+
+    function updateCountdown() {
+      const remainingSeconds = Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1000));
+      const mins = Math.floor(remainingSeconds / 60);
+      const secs = remainingSeconds % 60;
+      timerText.textContent = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+      updateExpiryText();
+
+      if (remainingSeconds <= 0) {
+        window.location.reload();
+      }
+    }
+
+    updateCountdown();
+    setInterval(updateCountdown, 1000);
+  })();
+</script>
+</body>
+</html>

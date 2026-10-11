@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>SOS Emergency Activation</title>
 <meta name="keywords" content="" />
 <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
@@ -172,6 +173,32 @@ button.emergency {
   }
   .quick-add-form label {
     display: block;
+  }
+  .card {
+    padding: 0 8px 16px;
+  }
+  button.emergency {
+    width: min(170px, 62vw);
+    height: min(170px, 62vw);
+    font-size: 20px;
+  }
+  .contacts-actions a,
+  .contacts-actions button,
+  .quick-add-form button,
+  .quick-add-form input[type="text"],
+  .quick-add-form input[type="tel"],
+  .quick-add-form input[type="email"] {
+    width: 100%;
+    margin: 4px 0;
+  }
+  .contact-list {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .contact-list th,
+  .contact-list td {
+    min-width: 110px;
   }
 }
 </style>

@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Emergency Contacts</title>
 <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
 <style>
@@ -37,7 +38,15 @@ body { background-image: url("{% static 'images/back.jpg' %}"); }
 input[type=text], input[type=email], input[type=tel] { width: 100%; max-width: 320px; padding: 8px; }
 .checkbox-row { margin: 8px 0; }
 .error { color: #b30000; font-size: 13px; margin: 5px 0; }
-@media (max-width: 640px) { .container { padding: 10px; } .form-grid table, .form-grid table tbody, .form-grid table tr, .form-grid table td { display: block; width: 100%; } }
+@media (max-width: 640px) {
+    .container { padding: 10px; margin-top: 10px; }
+    .contact-card { padding: 14px; }
+    .form-grid { padding: 14px; }
+    .form-grid table, .form-grid table tbody, .form-grid table tr, .form-grid table td { display: block; width: 100%; }
+    .form-grid table td { padding: 5px 0; }
+    .form-grid input[type=text], .form-grid input[type=email], .form-grid input[type=tel] { max-width: 100%; }
+    .actions a, .actions button, .primary-btn, .cancel-btn { margin: 4px 4px 0 0; padding: 10px 12px; }
+}
 </style>
 </head>
 <body>

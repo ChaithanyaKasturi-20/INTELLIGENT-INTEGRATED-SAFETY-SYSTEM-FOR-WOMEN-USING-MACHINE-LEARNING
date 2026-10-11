@@ -12,7 +12,7 @@ class EmergencyContactTestCase(TestCase):
     def setUp(self):
         self.client = Client()
         self.username = 'alice'
-        self.email = 'alice@example.com'
+        self.email = 'alice@gmail.com'
 
         session = self.client.session
         session['username'] = self.username
@@ -24,7 +24,7 @@ class EmergencyContactTestCase(TestCase):
         response = self.client.post('/EmergencyContactAdd', {
             'name': 'Mom',
             'phone_number': '+91 9876543210',
-            'email': 'mom@example.com',
+            'email': 'mom@safealarm.mail',
             'relationship': 'Mother',
             'is_primary': 'on',
             'is_active': 'on',
@@ -34,7 +34,7 @@ class EmergencyContactTestCase(TestCase):
 
     def test_primary_contact_behavior(self):
         first = EmergencyContact.objects.create(user=self.username, name='A', phone_number='+91 1111111111', is_primary=True, is_active=True)
-        second = EmergencyContact.objects.create(user=self.username, name='B', phone_number='+91 2222222222', is_primary=False, is_active=True)
+        second = EmergencyContact.objects.create(user=self.username, name='B', phone_number='+91 2222222222', email='b@safealarm.mail', is_primary=False, is_active=True)
 
         second.is_primary = True
         second.save()
@@ -51,12 +51,12 @@ class EmergencyContactTestCase(TestCase):
         self.assertFalse(contact.is_active)
 
     def test_phone_validation(self):
-        contact = EmergencyContact(user=self.username, name='Test', phone_number='invalid', email='test@example.com')
+        contact = EmergencyContact(user=self.username, name='Test', phone_number='invalid', email='test@safealarm.mail')
         with self.assertRaises(ValidationError):
             contact.full_clean()
 
     def test_email_validation(self):
-        contact = EmergencyContact(user=self.username, name='Test', phone_number='+91 1234567890', email='not-valid')
+        contact = EmergencyContact(user=self.username, name='Test', phone_number='+91 1234567890', email='not-valid-mail')
         with self.assertRaises(ValidationError):
             contact.full_clean()
 
@@ -71,13 +71,40 @@ class SOSDeliveryTestCase(TestCase):
     def setUp(self):
         self.client = Client()
         self.username = 'alice'
-        self.email = 'alice@example.com'
+        self.email = 'alice@gmail.com'
 
         session = self.client.session
         session['username'] = self.username
         session['email'] = self.email
         session['is_logged_in'] = True
         session.save()
+
+    def test_registration_email_becomes_primary_emergency_contact(self):
+        username = 'charlie'
+        with get_register_db_connection() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO register (username, password, contact_no, email, address) VALUES (?, ?, ?, ?, ?)",
+                (username, 'password', '9999999999', 'charlie@gmail.com', 'Test address')
+            )
+            conn.commit()
+
+        EmergencyContact.objects.create(user=username, name='Existing Contact', phone_number='+91 7777777777', email='existing@gmail.com', is_active=True, is_primary=False)
+        from .views import sync_signup_emergency_contact_for_user
+        contact = sync_signup_emergency_contact_for_user(username, 'charlie@gmail.com', '9999999999')
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact.email, 'charlie@gmail.com')
+        self.assertTrue(EmergencyContact.objects.filter(user=username, email='charlie@gmail.com', is_primary=True).exists())
+        self.assertTrue(EmergencyContact.objects.filter(user=username, email='existing@gmail.com').exists())
+
+    def test_no_hardcoded_placeholder_email_is_created(self):
+        username = 'placeholder-user'
+        from .views import sync_signup_emergency_contact_for_user
+
+        contact = sync_signup_emergency_contact_for_user(username, 'signupemergency@example.com', '9999999999')
+
+        self.assertIsNone(contact)
+        self.assertFalse(EmergencyContact.objects.filter(user=username, email='signupemergency@example.com').exists())
 
     @patch.dict(os.environ, {'PANIC_EMAIL_USER': 'sender@example.com', 'PANIC_EMAIL_PASS': 'secret'}, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
@@ -87,7 +114,7 @@ class SOSDeliveryTestCase(TestCase):
         with get_register_db_connection() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO register (username, password, contact_no, email, address) VALUES (?, ?, ?, ?, ?)",
-                (self.username, 'password', '9999999999', 'signupemergency@example.com', 'Test address')
+                (self.username, 'password', '9999999999', 'registered@gmail.com', 'Test address')
             )
             conn.commit()
 
@@ -95,7 +122,7 @@ class SOSDeliveryTestCase(TestCase):
 
         self.assertEqual(response.status_code, 302)
         sos_event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
-        self.assertTrue(EmergencyContact.objects.filter(user=self.username, email='signupemergency@example.com').exists())
+        self.assertTrue(EmergencyContact.objects.filter(user=self.username, email='registered@gmail.com').exists())
         self.assertTrue(SOSEmailDelivery.objects.filter(sos_event=sos_event).exists())
         mock_smtp.assert_called_once()
 
@@ -106,7 +133,7 @@ class SOSDeliveryTestCase(TestCase):
             user=self.username,
             name='Mom',
             phone_number='+91 1111111111',
-            email='mom@example.com',
+            email='mom@gmail.com',
             is_active=True,
             is_primary=True,
         )
@@ -121,8 +148,8 @@ class SOSDeliveryTestCase(TestCase):
     @patch.dict(os.environ, {'PANIC_EMAIL_USER': 'sender@example.com', 'PANIC_EMAIL_PASS': 'secret'}, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
     def test_sos_skips_inactive_contact(self, mock_smtp):
-        active_contact = EmergencyContact.objects.create(user=self.username, name='Active', phone_number='+91 1111111111', email='active@example.com', is_active=True)
-        inactive_contact = EmergencyContact.objects.create(user=self.username, name='Inactive', phone_number='+91 2222222222', email='inactive@example.com', is_active=False)
+        active_contact = EmergencyContact.objects.create(user=self.username, name='Active', phone_number='+91 1111111111', email='active@gmail.com', is_active=True)
+        inactive_contact = EmergencyContact.objects.create(user=self.username, name='Inactive', phone_number='+91 2222222222', email='inactive@gmail.com', is_active=False)
 
         self.client.post('/ActivateSOS', {'latitude': '10', 'longitude': '20'})
 
@@ -133,27 +160,31 @@ class SOSDeliveryTestCase(TestCase):
 
     @patch.dict(os.environ, {'PANIC_EMAIL_USER': 'sender@example.com', 'PANIC_EMAIL_PASS': 'secret'}, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_signup_email_is_used_when_contact_has_no_email(self, mock_smtp):
+    def test_contacts_without_email_are_excluded_from_email_delivery(self, mock_smtp):
         with get_register_db_connection() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO register (username, password, contact_no, email, address) VALUES (?, ?, ?, ?, ?)",
-                (self.username, 'password', '9999999999', 'signupemergency@example.com', 'Test address')
+                (self.username, 'password', '9999999999', 'registered@gmail.com', 'Test address')
             )
             conn.commit()
 
-        EmergencyContact.objects.create(user=self.username, name='No email', phone_number='+91 3333333333', email='', is_active=True)
+        active_with_email = EmergencyContact.objects.create(user=self.username, name='Active Mail', phone_number='+91 1111111111', email='active@gmail.com', is_active=True)
+        active_without_email = EmergencyContact.objects.create(user=self.username, name='No Email', phone_number='+91 2222222222', email='', is_active=True)
+        inactive_contact = EmergencyContact.objects.create(user=self.username, name='Inactive', phone_number='+91 3333333333', email='inactive@gmail.com', is_active=False)
 
         self.client.post('/ActivateSOS', {'latitude': '10', 'longitude': '20'})
 
         sos_event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
-        self.assertTrue(SOSEmailDelivery.objects.filter(sos_event=sos_event).exists())
+        self.assertTrue(SOSEmailDelivery.objects.filter(sos_event=sos_event, emergency_contact=active_with_email, status='sent').exists())
+        self.assertFalse(SOSEmailDelivery.objects.filter(sos_event=sos_event, emergency_contact=active_without_email).exists())
+        self.assertFalse(SOSEmailDelivery.objects.filter(sos_event=sos_event, emergency_contact=inactive_contact).exists())
         self.assertEqual(mock_smtp.call_count, 1)
 
     @patch.dict(os.environ, {'PANIC_EMAIL_USER': 'sender@example.com', 'PANIC_EMAIL_PASS': 'secret'}, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
     def test_multiple_contacts_are_handled_independently(self, mock_smtp):
-        first = EmergencyContact.objects.create(user=self.username, name='First', phone_number='+91 1111111111', email='first@example.com', is_active=True)
-        second = EmergencyContact.objects.create(user=self.username, name='Second', phone_number='+91 2222222222', email='second@example.com', is_active=True)
+        first = EmergencyContact.objects.create(user=self.username, name='First', phone_number='+91 1111111111', email='first@gmail.com', is_active=True)
+        second = EmergencyContact.objects.create(user=self.username, name='Second', phone_number='+91 2222222222', email='second@gmail.com', is_active=True)
 
         self.client.post('/ActivateSOS', {'latitude': '10', 'longitude': '20'})
 
@@ -165,8 +196,8 @@ class SOSDeliveryTestCase(TestCase):
     @patch.dict(os.environ, {'PANIC_EMAIL_USER': 'sender@example.com', 'PANIC_EMAIL_PASS': 'secret'}, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
     def test_one_failed_email_does_not_stop_other_recipients(self, mock_smtp):
-        first = EmergencyContact.objects.create(user=self.username, name='First', phone_number='+91 1111111111', email='first@example.com', is_active=True)
-        second = EmergencyContact.objects.create(user=self.username, name='Second', phone_number='+91 2222222222', email='second@example.com', is_active=True)
+        first = EmergencyContact.objects.create(user=self.username, name='First', phone_number='+91 1111111111', email='first@gmail.com', is_active=True)
+        second = EmergencyContact.objects.create(user=self.username, name='Second', phone_number='+91 2222222222', email='second@gmail.com', is_active=True)
         connection = mock_smtp.return_value.__enter__.return_value
         connection.sendmail.side_effect = [Exception('SMTP failed'), None]
 
@@ -180,7 +211,7 @@ class SOSDeliveryTestCase(TestCase):
     @patch.dict(os.environ, {'PANIC_EMAIL_USER': 'sender@example.com', 'PANIC_EMAIL_PASS': 'secret'}, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
     def test_duplicate_email_is_prevented_for_same_sos_event_contact(self, mock_smtp):
-        contact = EmergencyContact.objects.create(user=self.username, name='Mom', phone_number='+91 1111111111', email='mom@example.com', is_active=True)
+        contact = EmergencyContact.objects.create(user=self.username, name='Mom', phone_number='+91 1111111111', email='mom@safealarm.mail', is_active=True)
 
         self.client.post('/ActivateSOS', {'latitude': '10', 'longitude': '20'})
         self.client.post('/ActivateSOS', {'latitude': '10', 'longitude': '20'})
@@ -193,8 +224,8 @@ class SOSDeliveryTestCase(TestCase):
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
     def test_users_cannot_trigger_emails_to_another_users_contacts(self, mock_smtp):
         other_user = 'bob'
-        other_contact = EmergencyContact.objects.create(user=other_user, name='Other', phone_number='+91 4444444444', email='other@example.com', is_active=True)
-        my_contact = EmergencyContact.objects.create(user=self.username, name='Mine', phone_number='+91 5555555555', email='mine@example.com', is_active=True)
+        other_contact = EmergencyContact.objects.create(user=other_user, name='Other', phone_number='+91 4444444444', email='other@gmail.com', is_active=True)
+        my_contact = EmergencyContact.objects.create(user=self.username, name='Mine', phone_number='+91 5555555555', email='mine@gmail.com', is_active=True)
 
         self.client.post('/ActivateSOS', {'latitude': '10', 'longitude': '20'})
 
@@ -223,7 +254,7 @@ class PanicSOSIntegrationTestCase(TestCase):
     def setUp(self):
         self.client = Client()
         self.username = 'alice'
-        self.email = 'alice@example.com'
+        self.email = 'alice@gmail.com'
         session = self.client.session
         session['username'] = self.username
         session['email'] = self.email
@@ -244,7 +275,7 @@ class PanicSOSIntegrationTestCase(TestCase):
             user=self.username,
             name='Mom',
             phone_number='+91 9876543210',
-            email='mom@example.com',
+            email='mom@gmail.com',
             relationship='Mother',
             is_active=True,
             is_primary=True,
@@ -270,7 +301,7 @@ class PanicSOSIntegrationTestCase(TestCase):
         response = self.client.post('/EmergencyContactAdd', {
             'name': 'Sister',
             'phone_number': '+91 9999999999',
-            'email': 'sister@example.com',
+            'email': 'sister@gmail.com',
             'relationship': 'Sister',
             'is_primary': 'on',
             'return_to': 'Panic',
@@ -291,7 +322,7 @@ class PanicSOSIntegrationTestCase(TestCase):
             user=self.username,
             name='Mom',
             phone_number='+91 9876543210',
-            email='mom@example.com',
+            email='mom@gmail.com',
             is_active=True,
             is_primary=True,
         )
@@ -319,7 +350,7 @@ class PanicSOSIntegrationTestCase(TestCase):
             user=self.username,
             name='Mom',
             phone_number='+91 9876543210',
-            email='mom@example.com',
+            email='mom@gmail.com',
             is_active=True,
             is_primary=True,
         )

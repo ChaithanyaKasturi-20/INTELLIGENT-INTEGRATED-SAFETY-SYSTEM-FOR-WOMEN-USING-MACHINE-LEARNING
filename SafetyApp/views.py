@@ -11,16 +11,17 @@ import json
 import base64
 import sqlite3
 import logging
+import urllib.parse
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import pickle
 import smtplib
-from datetime import date
+from datetime import date, timedelta
 import seaborn as sns
 from django.utils import timezone
 
-from .models import EmergencyContact, SOSEvent, SOSEmailDelivery
+from .models import EmergencyContact, SafetyTimer as SafetyTimerModel, SOSEvent, SOSEmailDelivery, normalize_emergency_email
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,38 @@ def get_active_sos_for_user(user):
     return SOSEvent.objects.filter(user=user, status=SOSEvent.STATUS_ACTIVE).order_by('-activated_at').first()
 
 
+def get_current_safety_timer_for_user(user):
+    if not user:
+        return None
+    return SafetyTimerModel.objects.filter(user=user).order_by('-started_at').first()
+
+
+def process_expired_safety_timer_for_user(user):
+    if not user:
+        return None
+
+    timer = SafetyTimerModel.objects.filter(user=user, status=SafetyTimerModel.STATUS_ACTIVE).order_by('-started_at').first()
+    if timer is None:
+        return None
+
+    if timezone.now() < timer.expires_at:
+        return None
+
+    timer.mark_expired()
+    active_event = get_active_sos_for_user(user)
+    if active_event is None:
+        active_event = SOSEvent.objects.create(
+            user=user,
+            latitude=None,
+            longitude=None,
+            status=SOSEvent.STATUS_ACTIVE,
+            activated_at=timezone.now(),
+        )
+        send_sos_emails_for_event(active_event)
+
+    return timer
+
+
 def get_registered_emergency_email_for_user(user):
     if not user:
         return ''
@@ -96,32 +129,132 @@ def get_registered_emergency_email_for_user(user):
     return (row['email'] or '').strip()
 
 
-def get_signup_emergency_contact_for_user(user):
-    signup_email = get_registered_emergency_email_for_user(user)
+def sync_signup_emergency_contact_for_user(user, email_value=None, phone_number=None):
+    if not user:
+        return None
+
+    signup_email = (email_value or get_registered_emergency_email_for_user(user) or '').strip()
+    signup_email = normalize_emergency_email(signup_email)
     if not signup_email:
         return None
 
-    contact, created = EmergencyContact.objects.get_or_create(
+    existing_contacts = EmergencyContact.objects.filter(user=user)
+    matching_contact = existing_contacts.filter(email__iexact=signup_email).first()
+    if matching_contact is not None:
+        if not matching_contact.is_active or not matching_contact.is_primary:
+            matching_contact.is_active = True
+            matching_contact.is_primary = True
+            matching_contact.name = matching_contact.name or 'Emergency Contact'
+            matching_contact.phone_number = (matching_contact.phone_number or phone_number or '0000000000').strip() or '0000000000'
+            matching_contact.relationship = matching_contact.relationship or 'Registered emergency contact'
+            matching_contact.save(update_fields=['is_active', 'is_primary', 'name', 'phone_number', 'relationship'])
+        return matching_contact
+
+    fallback_name = 'Emergency Contact'
+    fallback_phone = (phone_number or '0000000000').strip() or '0000000000'
+    contact = EmergencyContact.objects.create(
         user=user,
         email=signup_email,
-        defaults={
-            'name': 'Emergency Contact',
-            'phone_number': '0000000000',
-            'relationship': 'Registered emergency contact',
-            'is_primary': True,
-            'is_active': True,
-        },
+        name=fallback_name,
+        phone_number=fallback_phone,
+        relationship='Registered emergency contact',
+        is_primary=True,
+        is_active=True,
+    )
+    return contact
+
+
+def get_signup_emergency_contact_for_user(user):
+    return sync_signup_emergency_contact_for_user(user)
+
+
+def SafetyTimer(request):
+    if request.method != 'GET':
+        return redirect('UserLogin')
+
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
+        return redirect_response
+
+    timer = process_expired_safety_timer_for_user(current_user)
+    if timer is None:
+        timer = get_current_safety_timer_for_user(current_user)
+
+    if timer is None and not get_active_sos_for_user(current_user):
+        return redirect('Panic')
+
+    active_event = get_active_sos_for_user(current_user)
+    return render(request, 'SafetyTimer.html', {
+        'current_user': current_user,
+        'timer': timer,
+        'active_event': active_event,
+        'emergency_contact_count': EmergencyContact.objects.filter(user=current_user, is_active=True).count(),
+        'delivery_summary': get_sos_delivery_summary(active_event),
+    })
+
+
+def SafetyTimerAction(request):
+    if request.method != 'POST':
+        return redirect('SafetyTimer')
+
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
+        return redirect_response
+
+    duration_value = request.POST.get('duration', '15')
+    try:
+        duration_minutes = int(duration_value)
+    except (TypeError, ValueError):
+        duration_minutes = 15
+    duration_minutes = max(1, duration_minutes)
+
+    SafetyTimerModel.objects.filter(user=current_user, status=SafetyTimerModel.STATUS_ACTIVE).update(
+        status=SafetyTimerModel.STATUS_CANCELLED,
+        completed_at=timezone.now(),
     )
 
-    if created or not contact.is_active or not contact.is_primary:
-        contact.is_active = True
-        contact.is_primary = True
-        contact.name = contact.name or 'Emergency Contact'
-        contact.phone_number = contact.phone_number or '0000000000'
-        contact.relationship = contact.relationship or 'Registered emergency contact'
-        contact.save(update_fields=['is_active', 'is_primary', 'name', 'phone_number', 'relationship'])
+    timer = SafetyTimerModel.objects.create(
+        user=current_user,
+        started_at=timezone.now(),
+        expires_at=timezone.now() + timedelta(minutes=duration_minutes),
+        duration=duration_minutes,
+        status=SafetyTimerModel.STATUS_ACTIVE,
+    )
+    return redirect('SafetyTimer')
 
-    return contact
+
+def SafetyTimerSafe(request):
+    if request.method != 'POST':
+        return redirect('SafetyTimer')
+
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
+        return redirect_response
+
+    timer = get_current_safety_timer_for_user(current_user)
+    if timer is not None and timer.status in (SafetyTimerModel.STATUS_ACTIVE, SafetyTimerModel.STATUS_EXPIRED):
+        timer.mark_completed()
+
+    event = get_active_sos_for_user(current_user)
+    if event is not None:
+        event.mark_resolved()
+
+    return redirect('SafetyTimer')
+
+
+def SafetyTimerCancel(request):
+    if request.method != 'POST':
+        return redirect('SafetyTimer')
+
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
+        return redirect_response
+
+    timer = get_current_safety_timer_for_user(current_user)
+    if timer is not None and timer.status == SafetyTimerModel.STATUS_ACTIVE:
+        timer.mark_cancelled()
+
+    return redirect('SafetyTimer')
 
 
 def build_sos_email_subject(user_name):
@@ -305,6 +438,7 @@ def EmergencyContactAdd(request):
         relationship = (request.POST.get('relationship', '') or '').strip() or None
         is_primary = request.POST.get('is_primary') == 'on'
         is_active = request.POST.get('is_active') != 'off'
+        return_to = (request.POST.get('return_to', '') or '').strip()
 
         contact = EmergencyContact(
             user=current_user,
@@ -319,9 +453,7 @@ def EmergencyContactAdd(request):
         try:
             contact.full_clean()
             contact.save()
-            if request.POST.get('return_to') == 'Panic':
-                return redirect('Panic')
-            return redirect('EmergencyContacts')
+            return redirect('Panic' if return_to == 'Panic' else 'EmergencyContacts')
         except ValidationError as exc:
             contacts = EmergencyContact.objects.filter(user=current_user).order_by('-is_primary', 'name')
             return render(request, 'EmergencyContacts.html', {
@@ -422,19 +554,79 @@ def EmergencyContactToggleActive(request, contact_id):
     return redirect('EmergencyContacts')
 
 
+def build_google_maps_directions_url(destination, origin_lat=None, origin_lng=None, travel_mode='driving'):
+    cleaned_destination = (destination or '').strip()
+    if not cleaned_destination:
+        return ''
+
+    api_key = (os.environ.get('GOOGLE_MAPS_EMBED_API_KEY', '') or '').strip()
+    if not api_key:
+        return ''
+
+    destination_encoded = urllib.parse.quote_plus(cleaned_destination)
+    params = [
+        'key=' + api_key,
+        'destination=' + destination_encoded,
+        'mode=' + (travel_mode or 'driving'),
+    ]
+    if origin_lat is not None and origin_lng is not None:
+        params.insert(1, 'origin=' + urllib.parse.quote_plus('{lat},{lng}'.format(lat=origin_lat, lng=origin_lng)))
+    return 'https://www.google.com/maps/embed/v1/directions?' + '&'.join(params)
+
+
 def Route(request):
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
+        return redirect_response
+
     if request.method == 'GET':
-        return render(request, 'Route.html', {})
+        return render(request, 'Route.html', {
+            'route_map_url': '',
+            'route_destination': '',
+            'route_error': '',
+            'google_maps_embed_api_key': (os.environ.get('GOOGLE_MAPS_EMBED_API_KEY', '') or '').strip(),
+        })
+
+    return redirect('Route')
 
 
 def RouteAction(request):
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
+        return redirect_response
+
     if request.method == 'POST':
-        areaname = request.POST.get('t1', False)
-        areaname = areaname+" Police Station"
-        areaname = areaname.replace(" ","+")
-        output = '<iframe width="800" height="650" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" src="https://maps.google.com/maps?q='+areaname+'&amp;ie=UTF8&amp;&amp;output=embed"></iframe><br/>'
-        context= {'data':output}
-        return render(request, 'UserScreen.html', context)
+        destination = (request.POST.get('destination') or request.POST.get('t1') or '').strip()
+        origin_lat = request.POST.get('origin_lat', '').strip()
+        origin_lng = request.POST.get('origin_lng', '').strip()
+
+        if not destination:
+            return render(request, 'Route.html', {
+                'route_map_url': '',
+                'route_destination': '',
+                'route_error': 'Please enter a destination to find a safe route.',
+                'google_maps_embed_api_key': (os.environ.get('GOOGLE_MAPS_EMBED_API_KEY', '') or '').strip(),
+            })
+
+        origin_lat_value = float(origin_lat) if origin_lat else None
+        origin_lng_value = float(origin_lng) if origin_lng else None
+
+        if origin_lat_value is None or origin_lng_value is None:
+            return render(request, 'Route.html', {
+                'route_map_url': '',
+                'route_destination': destination,
+                'route_error': 'Unable to access your current location. Please allow location access to use Safe Route.',
+                'google_maps_embed_api_key': (os.environ.get('GOOGLE_MAPS_EMBED_API_KEY', '') or '').strip(),
+            })
+
+        return render(request, 'Route.html', {
+            'route_map_url': '',
+            'route_destination': destination,
+            'route_error': '',
+            'google_maps_embed_api_key': (os.environ.get('GOOGLE_MAPS_EMBED_API_KEY', '') or '').strip(),
+        })
+
+    return redirect('Route')
 
 
 def Heatmap(request):

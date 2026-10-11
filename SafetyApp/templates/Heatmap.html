@@ -2,6 +2,7 @@
 <html>
 <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Crime Intelligence Heatmap</title>
     <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -13,8 +14,8 @@
             font-family: Arial, sans-serif;
         }
         #map {
-            width: 960px;
-            height: 560px;
+            width: min(960px, 100%);
+            height: clamp(360px, 62vh, 560px);
             border: 2px solid #ccc;
             border-radius: 8px;
             background: #f7f7f7;
@@ -71,12 +72,36 @@
         }
         @media (max-width: 768px) {
             #map {
-                width: 90%;
-                height: 500px;
+                width: 100%;
+                height: 62vh;
+                min-height: 360px;
             }
             select {
                 width: 100%;
                 max-width: 220px;
+            }
+
+            #content > center,
+            #content > center > table {
+                width: 100%;
+            }
+
+            #content > center > table,
+            #content > center > table tbody,
+            #content > center > table tr,
+            #content > center > table td {
+                display: block;
+            }
+
+            #content > center > table td {
+                padding: 4px 0;
+            }
+
+            .legend {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 8px;
             }
         }
     </style>
@@ -255,6 +280,12 @@
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
+
+    window.addEventListener('resize', function() {
+        window.setTimeout(function() {
+            map.invalidateSize();
+        }, 150);
+    });
 
     function getIntensityColor(value, maxValue) {
         if (value === null || value === undefined || Number.isNaN(value)) {

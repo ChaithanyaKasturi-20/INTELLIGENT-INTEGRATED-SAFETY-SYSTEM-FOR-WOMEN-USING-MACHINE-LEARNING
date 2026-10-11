@@ -25,7 +25,11 @@ SECRET_KEY = 'uf7dczb7r5z-i%%h4w95xf5jyosd!rn+62=t+k!_&#-tu8#$2p'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "sega-arrives-made-tar.trycloudflare.com",
+]
 
 
 # Application definition
