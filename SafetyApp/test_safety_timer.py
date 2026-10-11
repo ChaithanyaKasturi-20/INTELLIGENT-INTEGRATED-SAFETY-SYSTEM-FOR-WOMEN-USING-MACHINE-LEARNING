@@ -10,6 +10,15 @@ from .models import EmergencyContact, SafetyTimer, SOSEvent, SOSEmailDelivery
 
 class SafetyTimerTestCase(TestCase):
     def setUp(self):
+        public_url_patch = patch.dict(os.environ, {'SOS_PUBLIC_BASE_URL': 'https://sos.example.org'}, clear=False)
+        public_url_patch.start()
+        self.addCleanup(public_url_patch.stop)
+        dns_patch = patch(
+            'SafetyApp.views.socket.getaddrinfo',
+            return_value=[(2, 1, 6, '', ('93.184.216.34', 443))],
+        )
+        dns_patch.start()
+        self.addCleanup(dns_patch.stop)
         self.client = Client()
         self.username = 'alice'
         self.email = 'alice@gmail.com'
@@ -177,7 +186,7 @@ class SafetyTimerTestCase(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Status:')
-        self.assertContains(response, 'SOS Active')
+        self.assertContains(response, 'SOS ACTIVE')
         self.assertContains(response, 'I Am Safe')
         self.assertNotContains(response, 'CANCEL TIMER')
 
@@ -224,7 +233,7 @@ class SafeRouteTestCase(TestCase):
         response = self.client.get('/Route')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Safe Route')
+        self.assertContains(response, 'Safe Places')
         self.assertContains(response, 'Detecting your current location...')
         self.assertContains(response, 'leaflet')
         self.assertContains(response, 'tile.openstreetmap.org')
@@ -259,7 +268,7 @@ class SafeRouteTestCase(TestCase):
         })
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Unable to access your current location. Please allow location access to use Safe Route.')
+        self.assertContains(response, 'Unable to access your current location. Please allow location access to use Safe Places.')
         self.assertNotContains(response, 'GOOGLE_MAPS_EMBED_API_KEY')
 
     def test_route_page_includes_journey_end_and_timer_controls(self):

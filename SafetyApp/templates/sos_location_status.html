@@ -1,0 +1,47 @@
+{% load static %}
+<div
+  class="sos-location-status"
+  id="sosLocationStatus"
+  data-update-url="{% url 'SOSLocationUpdate' %}"
+  data-status-url="{% url 'SOSLocationStatus' %}"
+  data-latitude="{{ active_event.latitude|default_if_none:'' }}"
+  data-longitude="{{ active_event.longitude|default_if_none:'' }}"
+  data-updated-at="{% if active_event.location_updated_at %}{{ active_event.location_updated_at|date:'c' }}{% endif %}"
+  role="status"
+  aria-live="polite"
+>
+  <p><strong>Live location:</strong> <span id="sosLocationState">Waiting for GPS</span> (this device)</p>
+  <p><strong>Latest saved location:</strong> <span id="sosLatestCoordinates">{% if active_event.latitude != None and active_event.longitude != None %}{{ active_event.latitude }}, {{ active_event.longitude }}{% else %}Not available{% endif %}</span></p>
+  {% if active_event.latitude != None and active_event.longitude != None %}
+    <p><a id="sosLatestMapLink" href="https://www.google.com/maps?q={{ active_event.latitude }},{{ active_event.longitude }}" target="_blank" rel="noopener noreferrer">View latest saved location on map</a></p>
+  {% else %}
+    <p><a id="sosLatestMapLink" hidden target="_blank" rel="noopener noreferrer">View latest saved location on map</a></p>
+  {% endif %}
+  <p><strong>Last location update:</strong> <time id="sosLocationUpdatedAt">{% if active_event.location_updated_at %}{{ active_event.location_updated_at|date:"Y-m-d H:i:s T" }}{% else %}Not available{% endif %}</time></p>
+  <p><strong>Emergency contacts notified:</strong> {{ delivery_summary.sent }} accepted by the SMTP server (not proof of receipt); {{ delivery_summary.failed }} failed; {{ delivery_summary.pending }} pending; {{ delivery_summary.unattempted }} not attempted; {{ delivery_summary.no_email }} without email.</p>
+  {% if delivery_summary.failures %}
+    <div class="sos-email-failures">
+      <strong>Email failure details:</strong>
+      <ul>
+        {% for failure in delivery_summary.failures %}
+          <li>{{ failure.contact_name }}: {{ failure.reason }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+  {% if delivery_summary.can_retry %}
+    <form method="post" action="{% url 'RetrySOSEmail' %}">
+      {% csrf_token %}
+      <button type="submit">Retry failed email notifications</button>
+    </form>
+  {% elif delivery_summary.failed and delivery_summary.sent %}
+    <p class="small-note">Automatic retry is blocked because an email was already accepted; replacing its secure link could invalidate it.</p>
+  {% endif %}
+  {% if public_location_link_configured %}
+    <p class="small-note">A public HTTPS location link is configured for eligible external contacts.</p>
+  {% else %}
+    <p class="small-note">External contact links are not configured. Local GPS still works here, but contacts cannot reach a 127.0.0.1 address from their phones.</p>
+  {% endif %}
+  <p class="small-note">Local GPS updates require this page to stay open, location permission, and an active internet connection. Browser or phone suspension, locking, or closing may pause tracking.</p>
+</div>
+<script src="{% static 'sos-location.js' %}?v=20261011-3" defer></script>

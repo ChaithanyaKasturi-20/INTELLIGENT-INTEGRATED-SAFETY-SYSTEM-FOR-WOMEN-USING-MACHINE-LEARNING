@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import community_views, journey_views, views
 
 urlpatterns = [
     path("", views.index),
@@ -32,4 +32,19 @@ urlpatterns = [
     path("SOS", views.SOSDashboard, name="SOSDashboard"),
     path("ActivateSOS", views.ActivateSOS, name="ActivateSOS"),
     path("UpdateSOSStatus", views.UpdateSOSStatus, name="UpdateSOSStatus"),
+    path("SOS/LocationUpdate", views.SOSLocationUpdate, name="SOSLocationUpdate"),
+    path("SOS/LocationStatus", views.SOSLocationStatus, name="SOSLocationStatus"),
+    path("SOS/RetryEmail", views.RetrySOSEmail, name="RetrySOSEmail"),
+    path("SOS/LiveLocation", views.SOSLiveLocationPage, name="SOSLiveLocationPage"),
+    path("SOS/LiveLocation/Data", views.SOSLiveLocationData, name="SOSLiveLocationData"),
+    path("Journeys", journey_views.journeys, name="Journeys"),
+    path("Journeys/Create", journey_views.create_journey, name="JourneyCreate"),
+    path("Journeys/<int:journey_id>/Start", journey_views.start_journey, name="JourneyStart"),
+    path("Journeys/<int:journey_id>/Safe", journey_views.confirm_journey_safe, name="JourneySafe"),
+    path("Journeys/<int:journey_id>/Extend", journey_views.extend_journey_deadline, name="JourneyExtend"),
+    path("Journeys/<int:journey_id>/End", journey_views.end_journey, name="JourneyEnd"),
+    path("CommunityReports", community_views.community_reports, name="CommunityReports"),
+    path("CommunityReports/MapData", community_views.community_report_map_data, name="CommunityReportMapData"),
+    path("CommunityReports/Submit", community_views.submit_community_report, name="CommunityReportSubmit"),
+    path("CommunityReports/<int:report_id>/Flag", community_views.flag_community_report, name="CommunityReportFlag"),
 ]

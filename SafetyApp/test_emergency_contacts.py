@@ -69,6 +69,15 @@ class EmergencyContactTestCase(TestCase):
 
 class SOSDeliveryTestCase(TestCase):
     def setUp(self):
+        public_url_patch = patch.dict(os.environ, {'SOS_PUBLIC_BASE_URL': 'https://sos.example.org'}, clear=False)
+        public_url_patch.start()
+        self.addCleanup(public_url_patch.stop)
+        dns_patch = patch(
+            'SafetyApp.views.socket.getaddrinfo',
+            return_value=[(2, 1, 6, '', ('93.184.216.34', 443))],
+        )
+        dns_patch.start()
+        self.addCleanup(dns_patch.stop)
         self.client = Client()
         self.username = 'alice'
         self.email = 'alice@gmail.com'
@@ -331,8 +340,8 @@ class PanicSOSIntegrationTestCase(TestCase):
 
         response = self.client.get('/Panic')
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'SOS Active')
-        self.assertContains(response, 'emergency contact(s)')
+        self.assertContains(response, 'SOS ACTIVE')
+        self.assertContains(response, 'Emergency contacts notified:')
         self.assertContains(response, 'Emergency alerts:')
         self.assertContains(response, 'https://www.google.com/maps?q=12.34,56.78')
 

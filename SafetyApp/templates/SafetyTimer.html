@@ -114,19 +114,19 @@ button.safe {
       <div class="card">
         {% if active_event %}
           <div class="status-box active-status">
-            <p><strong>Status:</strong> <span class="warning">SOS Active</span></p>
+            <p><strong>Status:</strong> <span class="warning">SOS ACTIVE</span></p>
             <p><strong>Activated:</strong> {{ active_event.activated_at }}</p>
-            {% if active_event.latitude and active_event.longitude %}
+            {% if active_event.latitude != None and active_event.longitude != None %}
               <p><strong>Location:</strong> {{ active_event.latitude }}, {{ active_event.longitude }}</p>
               <p><a href="https://www.google.com/maps?q={{ active_event.latitude }},{{ active_event.longitude }}" target="_blank">View location on Google Maps</a></p>
             {% else %}
               <p><strong>Location:</strong> Browser location unavailable at activation time.</p>
             {% endif %}
-            <p><strong>{{ emergency_contact_count }} emergency contact(s) are configured for this account.</strong></p>
+            {% include "sos_location_status.html" %}
 
             <div class="status-box" style="background:#fffaf3; border-color:#d9d9d9; margin-top:12px; margin-bottom:10px;">
               <strong>Emergency alerts:</strong><br />
-              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) sent</span><br />
+              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) accepted for delivery</span><br />
               <span style="color:#b30000;">✗ {{ delivery_summary.failed }} email(s) failed</span><br />
               <span style="color:#8a6d1d;">⚠ {{ delivery_summary.no_email }} contact(s) have no email</span>
             </div>

@@ -1,100 +1,69 @@
 {% load static %}
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</title>
-<meta name="keywords" content="" />
-<meta name="Premium Series" content="" />
-<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
-<script language="javascript">
-	function validate(formObj)
-	{
-	if(formObj.t1.value.length==0)
-	{
-	alert("Please Enter username");
-	formObj.t1.focus();
-	return false;
-	}
-	if(formObj.t2.value.length==0)
-	{
-	alert("Please Enter password");
-	formObj.t2.focus();
-	return false;
-	}
-	return true;
-	}
-	</script>
-<style>
-body {
-  background-image: url("{% static 'images/back.jpg' %}");
-}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>User Login | Intelligent Integrated Safety System</title>
+  <link href="{% static 'default.css' %}?v=20261011-4" rel="stylesheet" type="text/css" media="screen" />
 </head>
-<body>
-<!-- start header -->
-<div id="header">
-	<div id="logo">
-		<h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font>
+<body class="public-page" style="background-image: url('{% static 'images/back.jpg' %}');">
+  <header id="header" class="public-header">
+    <div id="logo">
+      <h1>Intelligent Integrated Safety System for Women Using Machine Learning</h1>
+    </div>
+    <nav id="menu" aria-label="Main navigation">
+      <ul id="main">
+        <li><a href="{% url 'index' %}">Home</a></li>
+        <li class="current_page_item"><a href="{% url 'UserLogin' %}" aria-current="page">User Login Here</a></li>
+        <li><a href="{% url 'Register' %}">New User Signup Here</a></li>
+      </ul>
+    </nav>
+  </header>
 
-</center></span></h1>
-		
-	</div>
-	<div id="menu">
-		<ul id="main">
-			<li class="current_page_item"><a href="{% url 'index' %}"><font size="4" color="white">Home</a></li><td></td>
-			<li><a href="{% url 'UserLogin' %}"><font size="4" color="white">User Login Here</a></li><td></td>
-			<li><a href="{% url 'Register' %}"><font size="4" color="white">New User Signup Here</a></li><td></td>
-			<td></td>		
-     
-		</ul>
-		
-	</div>
-	
-</div>
+  <div id="wrapper">
+    <main id="page">
+      <div id="content" class="public-content public-home-panel">
+        <div class="flower">
+          <img class="public-banner" src="{% static 'images/tra.jpg' %}" alt="" />
+        </div>
+        <section class="auth-panel" aria-labelledby="login-title">
+          <h2 id="login-title">User Login</h2>
+          {% for message in messages %}
+            <p class="auth-feedback {{ message.tags }}" role="status" aria-live="polite">{{ message }}</p>
+          {% endfor %}
+          {% if data %}
+            <p class="auth-feedback" role="status" aria-live="polite">{{ data }}</p>
+          {% endif %}
+          <form class="auth-form" name="f1" method="post" action="{% url 'UserLoginAction' %}" onsubmit="return validate(this)">
+            {% csrf_token %}
+            <label for="login-username">Username</label>
+            <input id="login-username" type="text" name="t1" autocomplete="username" required />
 
-<div id="wrapper">
-	<!-- start page -->
-	<div id="page">
-		 <form name="f1" method="post" action="{% url 'UserLoginAction' %}" OnSubmit="return validate(this)">
-	{% csrf_token %}
-		<!-- start content -->
-		<div id="content">
-		<div class="flower"><img src="{% static 'images/tra.jpg' %}" alt="" width="800" height="200" /></center></div>
-			<br/><br/>
-			<div class="flower"><center><h1>
-			<font size="" align="center">
-			User Login Page</font><h1></div>
-			
-		
-			<center><font face="verdana" color="blue">{{ data|safe }}</center></font>
-		<br/>
-			<table align="center">
-<tr><td><font size="3" color="black">Username</td><td><input type="text" name="t1" size="30"/></td></tr>
-<tr><td><font size="3" color="black">Password</td><td><input type="password" name="t2" size="30"/></td></tr>
+            <label for="login-password">Password</label>
+            <input id="login-password" type="password" name="t2" autocomplete="current-password" required />
 
-</td></tr>
+            <button type="submit">Login</button>
+          </form>
+        </section>
+      </div>
+    </main>
+  </div>
 
-</td></tr>
-<tr><td></td><td><input type="submit" value="Login"></td>
-</td></tr></table>
-</form>
-			</table>
-			</center><br /><div class="post">
-				
-				<div class="entry">
-					
-				</div>
-			</div>
-		</div>
-		<!-- end content -->
-		<!-- start sidebars -->
-		
-		<!-- end sidebars -->
-		<div style="clear: both;">&nbsp;</div>
-	</div>
-	<!-- end page -->
-</div>
+  <script>
+    function validate(formObj) {
+      if (formObj.t1.value.length === 0) {
+        alert("Please Enter username");
+        formObj.t1.focus();
+        return false;
+      }
+      if (formObj.t2.value.length === 0) {
+        alert("Please Enter password");
+        formObj.t2.focus();
+        return false;
+      }
+      return true;
+    }
+  </script>
 </body>
 </html>
-

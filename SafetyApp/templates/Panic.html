@@ -226,22 +226,21 @@ button.emergency {
       <div class="card">
         <h2>🚨 Panic / Emergency SOS</h2>
         <p class="small-note">If you are in immediate danger, activate SOS to alert your configured emergency contacts.</p>
+        {% if messages %}
+          {% for message in messages %}
+            <p class="status-box" role="status">{{ message }}</p>
+          {% endfor %}
+        {% endif %}
 
         {% if active_event %}
           <div class="status-box active-status">
-            <p><strong>Status:</strong> <span class="warning">SOS Active</span></p>
+            <p><strong>Status:</strong> <span class="warning">SOS ACTIVE</span></p>
             <p><strong>Activated:</strong> {{ active_event.activated_at }}</p>
-            {% if active_event.latitude and active_event.longitude %}
-              <p><strong>Location:</strong> {{ active_event.latitude }}, {{ active_event.longitude }}</p>
-              <p><a href="https://www.google.com/maps?q={{ active_event.latitude }},{{ active_event.longitude }}" target="_blank">View location on Google Maps</a></p>
-            {% else %}
-              <p><strong>Location:</strong> Browser location unavailable at activation time.</p>
-            {% endif %}
-            <p class="small-note">{{ emergency_contact_count }} emergency contact(s) are configured for this account.</p>
+            {% include "sos_location_status.html" %}
 
             <div class="status-box" style="background:#fffaf3; border-color:#d9d9d9; margin-top:12px; margin-bottom:10px;">
               <strong>Emergency alerts:</strong><br />
-              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) sent</span><br />
+              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) accepted for delivery</span><br />
               <span style="color:#b30000;">✗ {{ delivery_summary.failed }} email(s) failed</span><br />
               <span style="color:#8a6d1d;">⚠ {{ delivery_summary.no_email }} contact(s) have no email</span>
               {% if delivery_summary.pending %}
@@ -267,7 +266,8 @@ button.emergency {
             <button id="cancelButton" class="cancel-sos" type="button">Cancel SOS</button>
           </form>
 
-          <p class="small-note">You can activate SOS only once at a time. Existing active emergency contacts are counted but not notified.</p>
+          <p id="activationLocationStatus" class="small-note" role="status" aria-live="polite"></p>
+          <p class="small-note">You can activate SOS only once at a time. Local GPS tracking works without email configuration. External contacts need a configured public HTTPS link; a 127.0.0.1 address is reachable only from this device.</p>
         {% endif %}
 
         <hr class="section-divider" />
@@ -354,26 +354,51 @@ button.emergency {
     const countdownEl = document.getElementById('countdown');
     const activateButton = document.getElementById('activateButton');
     const cancelButton = document.getElementById('cancelButton');
+    const locationStatus = document.getElementById('activationLocationStatus');
     const defaultButtonMarkup = '<span class="sos-icon">🚨</span><span>SOS</span>';
     let timer = null;
-
-    function gatherLocation() {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(function(position) {
-          document.getElementById('latitude').value = position.coords.latitude;
-          document.getElementById('longitude').value = position.coords.longitude;
-        }, function() {
-          document.getElementById('latitude').value = '';
-          document.getElementById('longitude').value = '';
-        }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
-      }
-    }
+    let activationAttempt = 0;
 
     activateButton.addEventListener('click', function(event) {
       event.preventDefault();
       activateButton.disabled = true;
       cancelButton.style.display = 'block';
-      gatherLocation();
+      const currentAttempt = ++activationAttempt;
+      let locationReady = false;
+      let countdownReady = false;
+      let submitted = false;
+
+      function submitWhenReady() {
+        if (currentAttempt !== activationAttempt || submitted || !locationReady || !countdownReady) return;
+        submitted = true;
+        form.submit();
+      }
+
+      function finishLocation(statusText) {
+        if (currentAttempt !== activationAttempt) return;
+        locationStatus.textContent = statusText;
+        locationReady = true;
+        submitWhenReady();
+      }
+
+      locationStatus.textContent = 'Requesting current location…';
+      if (!navigator.geolocation) {
+        finishLocation('Location is unavailable in this browser. SOS will still activate.');
+      } else {
+        navigator.geolocation.getCurrentPosition(function(position) {
+          if (currentAttempt !== activationAttempt) return;
+          document.getElementById('latitude').value = String(position.coords.latitude);
+          document.getElementById('longitude').value = String(position.coords.longitude);
+          finishLocation('Location acquired. Activating SOS…');
+        }, function(error) {
+          if (currentAttempt !== activationAttempt) return;
+          document.getElementById('latitude').value = '';
+          document.getElementById('longitude').value = '';
+          finishLocation(error.code === error.PERMISSION_DENIED
+            ? 'Location permission denied. SOS will activate without a location.'
+            : 'Could not obtain your location. SOS will activate without a location.');
+        }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 });
+      }
 
       let seconds = 3;
       countdownEl.style.display = 'block';
@@ -381,18 +406,25 @@ button.emergency {
       activateButton.innerHTML = '<span class="countdown-number">' + seconds + '</span>';
 
       timer = setInterval(function() {
+        if (currentAttempt !== activationAttempt) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
         seconds -= 1;
-        countdownEl.textContent = seconds;
-        activateButton.innerHTML = '<span class="countdown-number">' + seconds + '</span>';
+        countdownEl.textContent = Math.max(seconds, 0);
+        activateButton.innerHTML = '<span class="countdown-number">' + Math.max(seconds, 0) + '</span>';
         if (seconds <= 0) {
           clearInterval(timer);
           timer = null;
-          form.submit();
+          countdownReady = true;
+          submitWhenReady();
         }
       }, 1000);
     });
 
     cancelButton.addEventListener('click', function() {
+      activationAttempt += 1;
       if (timer) {
         clearInterval(timer);
         timer = null;
@@ -402,10 +434,9 @@ button.emergency {
       activateButton.innerHTML = defaultButtonMarkup;
       cancelButton.style.display = 'none';
       activateButton.disabled = false;
+      locationStatus.textContent = 'SOS activation cancelled.';
     });
   })();
 </script>
 </body>
 </html>
-
-

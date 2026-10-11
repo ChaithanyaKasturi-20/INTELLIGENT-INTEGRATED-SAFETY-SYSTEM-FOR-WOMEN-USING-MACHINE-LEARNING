@@ -1,73 +1,38 @@
 {% load static %}
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</title>
-<meta name="keywords" content="" />
-<meta name="Premium Series" content="" />
-<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
-<style>
-body {
-  background-image: url("{% static 'images/back.jpg' %}");
-}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Intelligent Integrated Safety System for Women Using Machine Learning</title>
+  <link href="{% static 'default.css' %}?v=20261011-4" rel="stylesheet" type="text/css" media="screen" />
 </head>
-<body>
-<!-- start header -->
-<div id="header">
-	<div id="logo">
-		<h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font>
+<body class="public-page" style="background-image: url('{% static 'images/back.jpg' %}');">
+  <header id="header" class="public-header">
+    <div id="logo">
+      <h1>Intelligent Integrated Safety System for Women Using Machine Learning</h1>
+    </div>
+    <nav id="menu" aria-label="Main navigation">
+      <ul id="main">
+        <li class="current_page_item"><a href="{% url 'index' %}" aria-current="page">Home</a></li>
+        <li><a href="{% url 'UserLogin' %}">User Login Here</a></li>
+        <li><a href="{% url 'Register' %}">New User Signup Here</a></li>
+      </ul>
+    </nav>
+  </header>
 
-</center></span></h1>
-		
-	</div>
-	<div id="menu">
-		<ul id="main">
-			<li class="current_page_item"><a href="{% url 'index' %}"><font size="4" color="white">Home</a></li><td></td>
-			<li><a href="{% url 'UserLogin' %}"><font size="4" color="white">User Login Here</a></li><td></td>
-			<li><a href="{% url 'Register' %}"><font size="4" color="white">New User Signup Here</a></li><td></td>
-			<td></td>		
-     
-		</ul>
-     
-		</ul>
-		
-	</div>
-	
-</div>
-<div id="wrapper">
-	<!-- start page -->
-	<div id="page">
-		
-		<!-- start content -->
-		<div id="content">
-			<div class="flower"><img src="{% static 'images/tra.jpg' %}" alt="" width="800" height="200" /></center></div>
-			<br/><br/>
-			<center><font size="3" color="black">INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center>
-		<center>
-		
-			<table align="center">
-			<tr>
-			<h3>
-			</p></h3>
-			</table>
-			</center><br /><div class="post">
-				
-				<div class="entry">
-					
-				</div>
-			</div>
-		</div>
-		<!-- end content -->
-		<!-- start sidebars -->
-		
-		<!-- end sidebars -->
-		<div style="clear: both;">&nbsp;</div>
-	</div>
-	<!-- end page -->
-</div>
+  <div id="wrapper">
+    <main id="page">
+      <div id="content" class="public-content public-home-panel">
+        <div class="flower">
+          <img class="public-banner" src="{% static 'images/tra.jpg' %}" alt="" />
+        </div>
+        <section class="public-welcome">
+          <h2>Welcome</h2>
+          <p>Explore the women’s safety tools and information in this project.</p>
+        </section>
+      </div>
+    </main>
+  </div>
 </body>
 </html>
-
-

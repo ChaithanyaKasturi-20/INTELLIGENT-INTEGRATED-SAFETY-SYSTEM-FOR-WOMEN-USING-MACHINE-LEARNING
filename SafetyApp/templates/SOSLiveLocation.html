@@ -1,0 +1,107 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Shared SOS Live Location</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; padding: 20px; color: #222; background: #f8f3f3; font: 16px/1.5 Arial, sans-serif; }
+    main { max-width: 900px; margin: 0 auto; padding: 20px; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(60,0,5,.12); }
+    h1 { color: #8c0209; font-size: 1.5rem; }
+    #shareStatus { padding: 12px; border-radius: 6px; background: #fff7df; }
+    #shareMap { width: 100%; height: min(65vh, 520px); min-height: 280px; border-radius: 8px; background: #eee; }
+    @media (max-width: 480px) { body { padding: 10px; } main { padding: 14px; } #shareMap { min-height: 320px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>SOS live location</h1>
+    <p id="shareStatus" role="status" aria-live="polite">Checking this secure sharing link…</p>
+    <p>Last location update: <time id="shareUpdatedAt">Not available</time></p>
+    <div id="shareMap" aria-label="Map showing the latest location shared during an active SOS"></div>
+    <p>This private link expires after 24 hours and stops working when the SOS is resolved. Updates depend on the user’s browser and device staying online with location access enabled.</p>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      var status = document.getElementById('shareStatus');
+      var updatedAt = document.getElementById('shareUpdatedAt');
+      var token = window.location.hash.slice(1);
+      var marker = null;
+      var map = L.map('shareMap').setView([20, 0], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+      function stop(message) {
+        status.textContent = message;
+        if (window.locationPoll) {
+          window.clearInterval(window.locationPoll);
+          window.locationPoll = null;
+        }
+      }
+
+      if (!token) {
+        stop('This sharing link is invalid or has expired.');
+        return;
+      }
+
+      function refresh() {
+        if (!token) {
+          stop('This sharing link is invalid or has expired.');
+          return;
+        }
+        fetch("{% url 'SOSLiveLocationData' %}", {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token }),
+          cache: 'no-store'
+        }).then(function (response) {
+          if (response.status === 404 || response.status === 410) {
+            stop(response.status === 410 ? 'SOS sharing has ended or this link has expired.' : 'This sharing link is invalid.');
+            return null;
+          }
+          if (!response.ok) throw new Error('Location lookup failed');
+          return response.json();
+        }).then(function (data) {
+          if (!data) return;
+          if (data.latitude === null || data.longitude === null) {
+            status.textContent = 'Waiting for the user’s device to report a location.';
+            return;
+          }
+          var point = [data.latitude, data.longitude];
+          if (!marker) {
+            marker = L.marker(point).addTo(map);
+            map.setView(point, 15);
+          } else {
+            marker.setLatLng(point);
+          }
+          updatedAt.dateTime = data.updated_at || '';
+          updatedAt.textContent = data.updated_at ? new Date(data.updated_at).toLocaleString() : 'Not available';
+          status.textContent = data.status === 'stale'
+            ? 'The last reported location is stale. Waiting for a newer update.'
+            : 'SOS is active. Showing the latest reported location.';
+        }).catch(function () {
+          status.textContent = 'Unable to refresh the location right now. Retrying shortly.';
+        });
+      }
+
+      refresh();
+      window.locationPoll = window.setInterval(refresh, 30000);
+      window.addEventListener('pagehide', function () {
+        if (window.locationPoll) {
+          window.clearInterval(window.locationPoll);
+          window.locationPoll = null;
+        }
+        token = '';
+      });
+    })();
+  </script>
+</body>
+</html>

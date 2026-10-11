@@ -1,0 +1,106 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Journeys</title>
+  <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+  <style>
+    .journeys-wrap { max-width: 900px; margin: 24px auto; padding: 16px; }
+    .journey-card { background: #fff; border: 1px solid #dfd3d3; border-radius: 9px; margin: 16px 0; padding: 16px; }
+    .journey-card h2 { margin: 0 0 10px; color: #8c0209; }
+    .journey-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
+    .journey-status { padding: 8px 10px; border-left: 4px solid #8c0209; background: #fff5f5; }
+    .journey-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+    .journey-actions form { margin: 0; }
+    .journey-actions button, .journey-actions select { min-height: 42px; padding: 8px 12px; }
+    .journey-timeline { margin-top: 12px; padding-left: 22px; }
+    .journey-message { padding: 10px; margin: 10px 0; background: #fff5f5; border-radius: 5px; }
+    @media (max-width: 640px) { .journey-meta { grid-template-columns: 1fr; } .journeys-wrap { padding: 10px; } }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <div id="logo"><h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1></div>
+    <div id="menu"><ul>
+      <li><a href="{% url 'Route' %}">Safe Places</a></li>
+      <li><a href="{% url 'Journeys' %}">My Journeys</a></li>
+      <li><a href="{% url 'CommunityReports' %}">Community Reports</a></li>
+      <li><a href="{% url 'EmergencyContacts' %}">Emergency Contacts</a></li>
+      <li><a href="{% url 'Panic' %}">SOS</a></li>
+      <li><a href="{% url 'Logout' %}">Logout</a></li>
+    </ul></div>
+  </div>
+  <main class="journeys-wrap">
+    <h1>Plan Journey and Journey Guardian</h1>
+    <p>Journey status is stored with your account. Browser navigation uses your device while this page is open; it is not guaranteed to continue in the background.</p>
+    {% for message in messages %}<div class="journey-message">{{ message }}</div>{% endfor %}
+    {% for journey in journeys %}
+      <section class="journey-card">
+        <h2>{{ journey.origin_label }} to {{ journey.destination_label }}</h2>
+        <div class="journey-status">Status: <strong>{{ journey.get_status_display }}</strong></div>
+        <div class="journey-meta">
+          <div>Planned departure: {{ journey.planned_departure|date:"Y-m-d H:i T" }}</div>
+          <div>Expected arrival/check-in: {{ journey.expected_arrival|date:"Y-m-d H:i T" }}</div>
+          <div>Preview distance: {{ journey.distance_meters }} m</div>
+          <div>Estimated duration: {{ journey.estimated_duration_seconds }} seconds</div>
+          {% if journey.started_at %}<div>Started: {{ journey.started_at|date:"Y-m-d H:i T" }}</div>{% endif %}
+          {% if journey.ended_at %}<div>Ended: {{ journey.ended_at|date:"Y-m-d H:i T" }}</div>{% endif %}
+        </div>
+        {% if journey.guardian_enabled %}
+          <p>Journey Guardian is enabled. An overdue check-in sends one email attempt to the selected active contacts. It does not activate SOS.</p>
+          <ul>{% for contact in journey.guardian_contacts.all %}<li>{{ contact.name }} — {{ contact.email }}</li>{% endfor %}</ul>
+        {% else %}
+          <p>Journey Guardian notifications are disabled for this journey.</p>
+        {% endif %}
+        {% if journey.status == "OVERDUE" %}
+          <p role="alert"><strong>Check-in overdue.</strong> No SOS was automatically activated. Confirm you are safe, extend the deadline, or end the journey.</p>
+        {% endif %}
+        <div class="journey-actions">
+          {% if journey.status == "PLANNED" or journey.status == "ACTIVE" %}
+            <a href="{% url 'Route' %}?journey_id={{ journey.pk }}">Open route preview / navigation</a>
+          {% endif %}
+          {% if journey.status == "ACTIVE" or journey.status == "OVERDUE" %}
+            <form method="post" action="{% url 'JourneySafe' journey.pk %}">{% csrf_token %}
+              <button type="submit">I am safe — check in</button>
+            </form>
+            <form method="post" action="{% url 'JourneyExtend' journey.pk %}">{% csrf_token %}
+              <label>Extend from now
+                <select name="minutes">
+                  <option value="5">5 minutes</option><option value="10">10 minutes</option>
+                  <option value="15">15 minutes</option><option value="30">30 minutes</option>
+                  <option value="60">60 minutes</option><option value="120">120 minutes</option>
+                </select>
+              </label>
+              <button type="submit">Extend check-in deadline</button>
+            </form>
+          {% endif %}
+          {% if journey.status == "PLANNED" or journey.status == "ACTIVE" or journey.status == "OVERDUE" %}
+            <form method="post" action="{% url 'JourneyEnd' journey.pk %}">{% csrf_token %}
+              <button type="submit">{% if journey.status == "PLANNED" %}Cancel plan{% else %}End journey{% endif %}</button>
+            </form>
+          {% endif %}
+        </div>
+        <h3>Journey activity</h3>
+        <ul class="journey-timeline">
+          {% for activity in journey.activities.all %}
+            <li>{{ activity.occurred_at|date:"Y-m-d H:i T" }} — {{ activity.get_action_display }}{% if activity.details %}: {{ activity.details }}{% endif %}</li>
+          {% empty %}
+            <li>No activity recorded yet.</li>
+          {% endfor %}
+        </ul>
+        {% for alert in journey.checkin_alerts.all %}
+          <p>Overdue notice for {{ alert.deadline_at|date:"Y-m-d H:i T" }}: {{ alert.get_status_display }}</p>
+          <ul>{% for delivery in alert.deliveries.all %}<li>{{ delivery.recipient_email }} — {{ delivery.get_status_display }}{% if delivery.error_message %} ({{ delivery.error_message }}){% endif %}</li>{% endfor %}</ul>
+        {% endfor %}
+      </section>
+    {% empty %}
+      <section class="journey-card">
+        <p>You have no saved journeys. Visit <a href="{% url 'Route' %}">Safe Places</a>, preview a route, and save a plan.</p>
+      </section>
+    {% endfor %}
+    <p><a href="{% url 'SafetyTimer' %}">Open the existing Safety Timer</a></p>
+  </main>
+</body>
+</html>

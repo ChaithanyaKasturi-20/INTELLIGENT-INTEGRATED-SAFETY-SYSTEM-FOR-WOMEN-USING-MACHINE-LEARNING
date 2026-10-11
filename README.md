@@ -29,13 +29,16 @@ The intended users are developers and evaluators exploring a prototype for safet
 | --- | --- |
 | Registration and login | Uses a project-specific SQLite `register` table. This is not Django’s built-in authentication system; passwords are stored as entered, so do not use real or reused passwords. |
 | Emergency contacts | Logged-in users can add, edit, activate/deactivate, select a primary contact, and delete contacts. Contact information is stored locally in SQLite. |
-| SOS | A logged-in user can create an SOS record, optionally including browser-provided coordinates, and cancel or resolve an active event. It does not dispatch police, ambulance, or other emergency services. |
-| SOS email | Attempts to send an email to active emergency contacts using Gmail SMTP when configured. The page records send/failure status; SMTP acceptance is not proof the recipient received or read a message. |
+| SOS | A logged-in user can create an SOS record with browser-provided coordinates when available, then cancel or resolve it. While the active SOS page remains open, the browser reports location changes to the same SOS event. It does not dispatch police, ambulance, or other emergency services. |
+| SOS live location | Active email contacts receive one expiring, token-protected map link when the public HTTPS origin is configured. It displays the latest position and whether it is stale; the token is revoked on SOS resolution/cancellation. Browser/device suspension can pause tracking. |
+| SOS email | Attempts an initial alert to active emergency contacts using the existing Gmail SMTP configuration. The message includes the activation time and available initial coordinates/map link; a secure live-location link is optional and appears only when a valid public HTTPS origin is configured. The page records accepted/failed status; SMTP acceptance is not proof the recipient received or read a message. |
 | Safety Timer | A user can start a timer, mark themselves safe, or cancel it. When the timer is overdue, the application checks expiry when the Safety Timer page is requested and can create an SOS event. There is no background scheduler or guaranteed automatic dispatch while the app is not being used. |
 | Crime data and state selector | Reads the bundled women-crime dataset. The current state form displays the first matching row’s `Rape` value; despite the page label, the handler does not run a live crime-prediction model. |
 | Crime heatmap | Visualizes the bundled state-level data and 2013 district-level data by category/year. These are historical aggregate records, not live or street-level crime reports. |
-| Route map and navigation | Uses the browser’s location, destination geocoding, and OSRM driving routes; the page can track location during in-page navigation. Routes are not crime-risk-ranked or guaranteed safe. Backgrounding or locking a phone may interrupt browser location updates. |
-| Nearby facilities | Queries OpenStreetMap/Overpass for mapped police stations, hospitals, pharmacies, fire stations, and clinics within approximately 5 km. Results depend on OpenStreetMap coverage and the public service’s availability. |
+| Safe Places and navigation | The existing Leaflet map retains destination search, OSRM route previews, GPS tracking, rerouting, and in-page navigation. Nearby police stations, hospitals, pharmacies, fire stations, and clinics are shown only when mapped in OpenStreetMap; routes are not crime-risk-ranked or guaranteed safe. Backgrounding or locking a phone may interrupt browser location updates. |
+| Plan Journey | A signed-in user can save a route preview, endpoints, estimated distance/duration, intended departure and expected arrival, then resume its route preview/navigation or end/cancel it. Estimates depend on OSRM and are not live traffic guarantees. |
+| Journey Guardian | A journey can opt in to a scheduled overdue check-in notice sent once to the selected active emergency contacts with email addresses. Users can check in, extend the deadline, or end a journey. It does not activate SOS. The scheduler is not started automatically; setup is required as described below. Email status is recorded, but SMTP acceptance does not prove delivery. |
+| Community Reports | Signed-in users can submit an incident category, description, past incident time, approximate map/device location, and optional JPEG/PNG evidence (5 MB maximum). Only Django staff-approved reports are public. Approval is moderation, not independent verification; reporter identity and evidence are excluded from the public feed/map. |
 | Neural-network accuracy chart | The `TrainML` view reads a saved `model/model_history.pckl` artifact and plots its training/validation accuracy. It displays existing history; it does not train a model at request time. |
 
 ## Screenshots
@@ -65,6 +68,8 @@ The mapping services are public third-party endpoints. Their availability and pe
 
 The public OSM tile service is best-effort and has no availability guarantee; it requires visible attribution and reasonable use. The public Nominatim service requires light usage (at most one request per second), an identifying User-Agent/Referer, and attribution. Overpass and the public OSRM demo service can also be rate-limited or unavailable. Do not use these shared endpoints for high-volume or production traffic.
 
+Community report maps use Leaflet and OSM tiles. Their content is user-submitted, moderator-approved allegations, not a live or verified crime map.
+
 ## Prerequisites
 
 - Windows 10/11 with PowerShell, Git, and the Python launcher (`py`).
@@ -87,7 +92,7 @@ py -3.9 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 python -m pip install --upgrade pip
-python -m pip install Django==2.1.7 numpy==1.26.4 pandas==2.2.3 matplotlib==3.9.2 seaborn==0.13.1
+python -m pip install Django==2.1.7 numpy==1.26.4 pandas==2.2.3 matplotlib==3.9.2 seaborn==0.13.1 Pillow==10.4.0
 ```
 
 These are the runtime packages directly imported by the app. The old TensorFlow/Keras packages listed in `requirements.txt` are not needed to run the current pages; the chart endpoint uses a saved pickle file instead.
@@ -103,7 +108,7 @@ This does not change the machine-wide execution policy. Alternatively, skip acti
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install Django==2.1.7 numpy==1.26.4 pandas==2.2.3 matplotlib==3.9.2 seaborn==0.13.1
+.\.venv\Scripts\python.exe -m pip install Django==2.1.7 numpy==1.26.4 pandas==2.2.3 matplotlib==3.9.2 seaborn==0.13.1 Pillow==10.4.0
 ```
 
 ### Environment variables and email
@@ -138,6 +143,8 @@ python manage.py migrate
 
 No `makemigrations` step is needed for a normal first run; apply the migrations already in `SafetyApp/migrations/`. The application creates its separate `register` table on demand when registration/login code accesses it.
 
+The `0005_auto_20261011_0843.py` migration adds journey plans/activity/check-in audit records and moderated community reports/flags. It does not remove existing tables or records. Keep an existing SQLite database in place and apply migrations normally.
+
 `db.sqlite3` is ignored by Git and is not supplied as a portable developer database. Migration creates the Django-managed tables; it does not create a demo account. If a local `db.sqlite3` already exists, it may contain user data—keep it and do not delete or reset it as routine setup.
 
 ## Run locally
@@ -169,11 +176,50 @@ Routes below are defined in `SafetyApp/urls.py`; some features redirect to the l
 | `/Dashboard` | User dashboard |
 | `/CrimePredict` | State selector |
 | `/Heatmap` | Historical crime heatmap |
-| `/Route` | Route map, location, and nearby facilities |
+| `/Route` | Safe Places map, route preview/navigation, and journey planning |
+| `/Journeys` | Signed-in user's saved route plans, guardian status, and check-in history |
+| `/CommunityReports` | Approved public feed/map and signed-in report submission/flagging |
 | `/EmergencyContacts` | Emergency-contact management |
 | `/Panic` or `/SOS` | SOS dashboard |
+| `/SOS/LocationUpdate` | Authenticated live location update for the signed-in user's active SOS |
+| `/SOS/LiveLocation` | Token-protected emergency-contact live-location map |
 | `/SafetyTimer` | Safety Timer |
 | `/TrainML` | Saved accuracy-history chart |
+
+Journey and report POST actions are listed in `SafetyApp/urls.py`. Community report moderation and private evidence downloads are available only through Django staff/admin accounts (`/admin/`).
+
+### Run Journey Guardian's overdue-check scheduler
+
+The management command processes overdue, opt-in journeys and records notification attempts:
+
+```powershell
+python manage.py process_overdue_journeys
+```
+
+It does **not** run automatically. For local development, run the command periodically from a second PowerShell window (for example, every minute):
+
+```powershell
+while ($true) {
+    python manage.py process_overdue_journeys
+    Start-Sleep -Seconds 60
+}
+```
+
+Stop the loop with **Ctrl+C**. For production, configure and monitor an OS/cloud scheduler to invoke the command once per minute using the same application release, environment variables, and database. Do not run overlapping scheduler instances. Email uses the existing `PANIC_EMAIL_USER` and `PANIC_EMAIL_PASS` SMTP configuration; missing configuration or send failures are recorded. One attempt per trusted contact is intentional: interrupted/ambiguous SMTP sends are not retried automatically to avoid duplicate notifications. A scheduled command, SMTP acceptance, or this prototype cannot guarantee that a contact receives or responds to an alert.
+
+Community evidence is stored under the ignored `private_uploads/` directory and is not mapped to a public media URL. Authorized Django staff can download evidence from the moderation screen. Keep that directory private in any deployment and do not configure a web server to serve it directly.
+
+### SOS live-location sharing
+
+The initial SOS email is independent of external live-location sharing. It is sent through the existing `PANIC_EMAIL_USER` / `PANIC_EMAIL_PASS` SMTP setup with the activation time and available coordinates / Google Maps link. If no safe public URL is configured, the email says it contains only the initial location; it is not sent a localhost URL.
+
+To include the optional secure recipient link, set `SOS_PUBLIC_BASE_URL` in the private `.env` file to the application's public HTTPS **origin only**, for example `https://sos.example.org`. Do not add a path, query, fragment, token, username, or password. The app rejects HTTP, localhost, private/loopback IPs, reserved local hostnames, domains that resolve to any non-public address, malformed URLs, and DNS names that cannot be resolved. Restart Django after changing `.env`; the origin is used to build the recipient link and is included in Django's allowed hosts only when it is a syntactically valid HTTPS origin.
+
+Each SOS gets a cryptographically random, event-specific 24-hour access token. Only its SHA-256 hash is stored. The raw token is placed in the URL fragment, removed from the recipient page's address bar immediately, and never sent to the location API as a URL parameter. Every location read checks the token, expiry, revocation, and active SOS state. Responses are non-cacheable and rate-limited. Resolving/cancelling the SOS revokes the link. The owner update endpoint is authenticated and updates only that owner's active SOS.
+
+**Do not point a public tunnel directly at port 8000.** That would expose the rest of the development site as well as the recipient page. A temporary demo must use a trusted, path-filtering reverse proxy or named tunnel ingress which forwards only `/SOS/LiveLocation`, `/SOS/LiveLocation/Data`, and (only if the owner uses the public origin for tracking) `/SOS/LocationUpdate`; send all other paths to a 404 response. Do not expose `/admin`, login/registration, or the full development server. A Cloudflare Quick Tunnel directly to `http://localhost:8000` does not provide this path restriction and is not appropriate for this project. Use a stable, controlled hostname and an HTTPS tunnel with path allowlisting; update `SOS_PUBLIC_BASE_URL` whenever its hostname changes. A local tunnel is for demos only, not production.
+
+The browser requests permission and coordinates when SOS is activated, then watches for changes while an active SOS page remains open. It posts on movement or at most every two minutes. The browser/device can pause location updates when suspended, locked, offline, or closed; recipients see when the last position is stale. The Safety Timer's existing expiry check creates the same SOS and sharing workflow when the Safety Timer page is visited after expiry; timer expiry is not a background scheduled event.
 
 ## Testing and verification
 
@@ -187,7 +233,7 @@ python manage.py test SafetyApp
 
 The registration-table initialization is needed in a fresh clone because several tests access the project-root SQLite table directly before the normal login/registration flow creates it. The tests also insert test registration rows outside Django’s isolated test database. Run these commands in a clean clone or disposable copy before adding personal data; do not point tests at a database containing user data.
 
-Verified in a disposable copy on 2026-10-11: all 40 tests passed after migrations and registration-table initialization. Running the suite against a fresh database without that initialization produced 12 errors because the tests queried a missing `register` table.
+Verified with Python 3.9/Django 2.1.7: all 65 app tests passed in a disposable source copy after initializing its separate `register` table. Exclude the real `db.sqlite3` and `.env` when making a test copy: legacy tests write to the project's separate registration table outside Django's temporary test database. The live project schema migration is additive; never run the suite against a database containing personal registration records.
 
 Automated tests do not verify real GPS accuracy, map-provider availability, external API policy compliance, or end-to-end email delivery. Manually test browser location permission, maps, and email using non-sensitive test accounts.
 
@@ -215,7 +261,8 @@ Automated tests do not verify real GPS accuracy, map-provider availability, exte
     │   ├── 0001_initial.py
     │   ├── 0002_sosevent.py
     │   ├── 0003_auto_20260912_2319.py
-    │   └── 0004_safetytimer.py
+    │   ├── 0004_safetytimer.py
+    │   └── 0005_auto_20261011_0843.py
     ├── static/
     ├── templates/
     ├── admin.py
@@ -223,9 +270,14 @@ Automated tests do not verify real GPS accuracy, map-provider availability, exte
     ├── models.py
     ├── urls.py
     ├── views.py
+    ├── journey_views.py
+    ├── journey_notifications.py
+    ├── community_views.py
+    ├── management/commands/process_overdue_journeys.py
     ├── tests.py
     ├── test_emergency_contacts.py
-    └── test_safety_timer.py
+    ├── test_safety_timer.py
+    └── test_journey_community.py
 ```
 
 - `Safety/` contains Django settings and project-level routing/entry points.
@@ -243,6 +295,9 @@ This repository is a prototype, not a production-ready safety or authentication 
 - The settings currently contain a hard-coded Django `SECRET_KEY`, set `DEBUG = True`, and explicitly allow a demo tunnel host. Do not deploy these settings publicly as-is. Production must use a secret supplied outside source control, `DEBUG = False`, an explicit `ALLOWED_HOSTS` list, HTTPS/security settings, and a reviewed deployment configuration.
 - Review authentication and authorization before deployment. The custom account flow is not Django’s standard authentication backend.
 - SOS coordinates, emergency-contact information, and registration data are sensitive. Use fictional demo data and restrict database/file access.
+- Journey endpoints are owner-filtered using the existing custom session account; they are not keyed to Django users. Community moderation is separately restricted to Django staff/admin accounts. Do not expose the Django admin or private evidence storage to untrusted users.
+- Community locations are rounded to two decimal places before storage, and public entries omit reporter identity and evidence. Report descriptions are user-generated; moderation cannot establish that allegations are true.
+- Journey Guardian sends route labels and the expected check-in time only to contacts selected by the user. Overdue status alone never activates SOS. Browser navigation is not guaranteed to continue in the background.
 - `.env` and all credentials must remain private. The `.env.example` file contains placeholders, never real values.
 - Public Quick Tunnels and the app’s debug configuration are not suitable for confidential data or production use.
 - SOS emails do not contact emergency services. In an emergency, use local official emergency services.

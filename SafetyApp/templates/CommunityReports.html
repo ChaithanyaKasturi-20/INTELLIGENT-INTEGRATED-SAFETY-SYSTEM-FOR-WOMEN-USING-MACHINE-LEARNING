@@ -1,0 +1,217 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Community Safety Reports</title>
+  <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <style>
+    .reports-wrap { max-width: 980px; margin: 24px auto; padding: 16px; }
+    .report-card, .report-form { margin: 16px 0; padding: 16px; border: 1px solid #dfd3d3; border-radius: 9px; background: #fff; }
+    .report-form label { display: block; margin: 12px 0; font-weight: bold; }
+    .report-form input[type="text"], .report-form input[type="datetime-local"], .report-form textarea, .report-form select { display: block; box-sizing: border-box; width: 100%; margin-top: 5px; padding: 10px; }
+    .report-form textarea { min-height: 120px; resize: vertical; }
+    #reportLocationMap { width: 100%; height: 300px; margin: 12px 0; border: 1px solid #aaa; }
+    #approvedReportsMap { width: 100%; height: 380px; border: 1px solid #aaa; }
+    .notice { padding: 12px; margin: 12px 0; background: #fff5df; border-left: 4px solid #a76b00; }
+    .message { padding: 10px; margin: 8px 0; background: #f3f3f3; }
+    .flag-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+    .flag-form select, .flag-form button, .report-form button { min-height: 42px; padding: 8px 12px; }
+    .status-badge { display: inline-block; padding: 5px 8px; border-radius: 5px; background: #eef4ff; font-weight: bold; }
+    @media (max-width: 640px) { .reports-wrap { padding: 10px; } #reportLocationMap { height: 260px; } #approvedReportsMap { height: 320px; } }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <div id="logo"><h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1></div>
+    <div id="menu"><ul>
+      <li><a href="{% url 'Route' %}">Safe Places</a></li>
+      <li><a href="{% url 'Journeys' %}">My Journeys</a></li>
+      <li><a href="{% url 'CommunityReports' %}">Community Reports</a></li>
+      <li><a href="{% url 'EmergencyContacts' %}">Emergency Contacts</a></li>
+      <li><a href="{% url 'Panic' %}">SOS</a></li>
+      <li><a href="{% url 'Logout' %}">Logout</a></li>
+    </ul></div>
+  </div>
+  <main class="reports-wrap">
+    <h1>Community Safety Reports</h1>
+    <div class="notice">
+      Reports are user-submitted allegations, not verified facts. Only moderator-approved reports appear publicly.
+      Approval means a report passed moderation; it does not mean an independent verification process occurred.
+      Do not include names, exact private addresses, or other identifying details. Use official emergency services for immediate danger.
+    </div>
+    {% for message in messages %}<div class="message">{{ message }}</div>{% endfor %}
+
+    <section class="report-form">
+      <h2>Submit a report for review</h2>
+      {% if request.session.is_logged_in %}
+      <form method="post" action="{% url 'CommunityReportSubmit' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label>Category
+          <select name="category" required>
+            {% for value, label in categories %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Description (avoid names and private addresses)
+          <textarea name="description" maxlength="2000" required></textarea>
+        </label>
+        <label>Incident date and time
+          <input type="datetime-local" name="incident_at" id="incidentAt" required />
+        </label>
+        <input type="hidden" name="timezone_offset_minutes" id="reportTimezoneOffset" />
+        <label>Approximate location — select the map or use device location
+          <div id="reportLocationMap" aria-label="Select approximate incident location"></div>
+          <button type="button" id="reportUseLocation">Use device location</button>
+        </label>
+        <div>
+          Approximate coordinates:
+          <span id="approximateCoordinates">No location selected</span>
+        </div>
+        <input type="hidden" name="approximate_latitude" id="reportLatitude" required />
+        <input type="hidden" name="approximate_longitude" id="reportLongitude" required />
+        <label>Optional evidence image (JPEG or PNG, maximum 5 MB)
+          <input type="file" name="evidence" accept=".jpg,.jpeg,.png,image/jpeg,image/png" />
+        </label>
+        <p>Evidence is kept private and can only be downloaded by authorized Django staff moderators.</p>
+        <button type="submit">Submit for moderation</button>
+      </form>
+      {% else %}
+      <p><a href="{% url 'UserLogin' %}">Sign in</a> with your app account to submit or flag a report.</p>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>Approved community reports</h2>
+      <p>Locations are rounded to approximately 1 km before storage. The map contains only approved reports and no reporter identity or evidence.</p>
+      <div id="approvedReportsMap" aria-label="Map of moderator-approved community reports"></div>
+      <div id="approvedReportsMapStatus" role="status" aria-live="polite"></div>
+      {% for report in reports %}
+      <article class="report-card">
+        <span class="status-badge">Moderator approved — not independently verified</span>
+        <h3>{{ report.get_category_display }}</h3>
+        <p>{{ report.description|linebreaksbr }}</p>
+        <p>Reported incident time: {{ report.incident_at|date:"Y-m-d H:i T" }}</p>
+        {% if request.session.is_logged_in %}
+        <form class="flag-form" method="post" action="{% url 'CommunityReportFlag' report.pk %}">
+          {% csrf_token %}
+          <label>Flag this report
+            <select name="reason" required>
+              <option value="">Choose a reason</option>
+              <option>Inaccurate information</option>
+              <option>Abusive or harmful</option>
+              <option>Personal information</option>
+              <option>Other concern</option>
+            </select>
+          </label>
+          <button type="submit">Send flag to moderators</button>
+        </form>
+        {% endif %}
+      </article>
+      {% empty %}
+      <p>No reports have been approved for public display.</p>
+      {% endfor %}
+    </section>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+  (function() {
+    const reportMapElement = document.getElementById('reportLocationMap');
+    const approvedMapElement = document.getElementById('approvedReportsMap');
+    const latitudeInput = document.getElementById('reportLatitude');
+    const longitudeInput = document.getElementById('reportLongitude');
+    const coordinateText = document.getElementById('approximateCoordinates');
+    const timezoneOffset = document.getElementById('reportTimezoneOffset');
+    const incidentAt = document.getElementById('incidentAt');
+    if (timezoneOffset) timezoneOffset.value = new Date().getTimezoneOffset();
+    if (incidentAt) {
+      const now = new Date();
+      now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+      incidentAt.value = now.toISOString().slice(0, 16);
+      incidentAt.max = incidentAt.value;
+    }
+
+    function createBaseMap(element, center, zoom) {
+      const map = L.map(element, { zoomControl: true, attributionControl: true }).setView(center, zoom);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      return map;
+    }
+
+    function setSelectedLocation(latitude, longitude, map, marker) {
+      const lat = Number(latitude);
+      const lon = Number(longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) return marker;
+      latitudeInput.value = lat.toFixed(5);
+      longitudeInput.value = lon.toFixed(5);
+      coordinateText.textContent = lat.toFixed(5) + ', ' + lon.toFixed(5) + ' (will be rounded before storage)';
+      if (marker) marker.setLatLng([lat, lon]);
+      else marker = L.marker([lat, lon], { draggable: true }).addTo(map);
+      marker.on('dragend', function(event) {
+        const point = event.target.getLatLng();
+        latitudeInput.value = point.lat.toFixed(5);
+        longitudeInput.value = point.lng.toFixed(5);
+        coordinateText.textContent = point.lat.toFixed(5) + ', ' + point.lng.toFixed(5) + ' (will be rounded before storage)';
+      });
+      map.setView([lat, lon], Math.max(map.getZoom(), 14));
+      return marker;
+    }
+
+    if (reportMapElement) {
+      const map = createBaseMap(reportMapElement, [20.5937, 78.9629], 5);
+      let marker = null;
+      map.on('click', function(event) {
+        marker = setSelectedLocation(event.latlng.lat, event.latlng.lng, map, marker);
+      });
+      document.getElementById('reportUseLocation').addEventListener('click', function() {
+        if (!navigator.geolocation) {
+          coordinateText.textContent = 'This browser does not provide location. Select the map instead.';
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(function(position) {
+          marker = setSelectedLocation(position.coords.latitude, position.coords.longitude, map, marker);
+        }, function() {
+          coordinateText.textContent = 'Location permission or device location is unavailable. Select the map instead.';
+        }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      });
+    }
+
+    if (approvedMapElement) {
+      const map = createBaseMap(approvedMapElement, [20.5937, 78.9629], 5);
+      fetch("{% url 'CommunityReportMapData' %}", { headers: { 'Accept': 'application/json' } })
+        .then(function(response) {
+          if (!response.ok) throw new Error('Map data is unavailable.');
+          return response.json();
+        })
+        .then(function(payload) {
+          const points = [];
+          (payload.reports || []).forEach(function(report) {
+            const marker = L.marker([report.latitude, report.longitude]).addTo(map);
+            const popup = document.createElement('div');
+            const title = document.createElement('strong');
+            title.textContent = report.category + ' — user-submitted, moderator approved; not independently verified';
+            const body = document.createElement('p');
+            body.textContent = report.description;
+            const when = document.createElement('small');
+            when.textContent = report.incident_at;
+            popup.appendChild(title);
+            popup.appendChild(body);
+            popup.appendChild(when);
+            marker.bindPopup(popup);
+            points.push([report.latitude, report.longitude]);
+          });
+          if (points.length) map.fitBounds(points, { padding: [24, 24], maxZoom: 13 });
+          document.getElementById('approvedReportsMapStatus').textContent =
+            points.length ? points.length + ' approved report(s) shown.' : 'No approved reports to display.';
+        })
+        .catch(function(error) {
+          document.getElementById('approvedReportsMapStatus').textContent = error.message;
+        });
+    }
+  })();
+  </script>
+</body>
+</html>

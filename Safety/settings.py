@@ -11,10 +11,24 @@ https://docs.djangoproject.com/en/2.0/ref/settings/
 """
 
 import os
+from urllib.parse import urlsplit
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+_local_env_path = os.path.join(BASE_DIR, '.env')
+if os.path.isfile(_local_env_path):
+    with open(_local_env_path, 'r', encoding='utf-8') as _local_env_file:
+        for _line in _local_env_file:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _value = _line.split('=', 1)
+                if _key.strip() == 'SOS_PUBLIC_BASE_URL':
+                    os.environ.setdefault(
+                        'SOS_PUBLIC_BASE_URL',
+                        _value.strip().strip('"').strip("'"),
+                    )
+                    break
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/2.0/howto/deployment/checklist/
@@ -25,11 +39,30 @@ SECRET_KEY = 'uf7dczb7r5z-i%%h4w95xf5jyosd!rn+62=t+k!_&#-tu8#$2p'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
+SOS_PUBLIC_BASE_URL = os.environ.get('SOS_PUBLIC_BASE_URL', '').strip().rstrip('/')
+_sos_public_host = ''
+try:
+    _sos_public_origin = urlsplit(SOS_PUBLIC_BASE_URL)
+    if (
+        _sos_public_origin.scheme == 'https'
+        and _sos_public_origin.hostname
+        and _sos_public_origin.path in ('', '/')
+        and not _sos_public_origin.username
+        and not _sos_public_origin.password
+        and not _sos_public_origin.query
+        and not _sos_public_origin.fragment
+    ):
+        _sos_public_host = _sos_public_origin.hostname
+except ValueError:
+    pass
+
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     "sega-arrives-made-tar.trycloudflare.com",
 ]
+if _sos_public_host and _sos_public_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_sos_public_host)
 
 
 # Application definition
@@ -123,3 +156,4 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.0/howto/static-files/
 
 STATIC_URL = '/static/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'private_uploads')

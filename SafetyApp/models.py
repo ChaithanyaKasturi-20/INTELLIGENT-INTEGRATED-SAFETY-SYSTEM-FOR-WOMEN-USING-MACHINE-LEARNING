@@ -1,8 +1,40 @@
 import re
+import os
+import uuid
+import warnings
 
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+
+
+def validate_community_evidence(upload):
+    max_bytes = 5 * 1024 * 1024
+    if upload.size > max_bytes:
+        raise ValidationError('Evidence images must be 5 MB or smaller.')
+
+    try:
+        from PIL import Image
+        upload.seek(0)
+        image = Image.open(upload)
+        if image.format not in ('JPEG', 'PNG'):
+            raise ValidationError('Evidence must be a JPEG or PNG image.')
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            image.verify()
+    except ValidationError:
+        raise
+    except Exception:
+        raise ValidationError('Evidence must be a valid JPEG or PNG image.')
+    finally:
+        upload.seek(0)
+
+
+def community_evidence_upload_path(instance, filename):
+    extension = os.path.splitext(filename)[1].lower()
+    if extension not in ('.jpg', '.jpeg', '.png'):
+        extension = '.jpg'
+    return 'community-reports/{}/{}'.format(uuid.uuid4().hex, uuid.uuid4().hex + extension)
 
 
 def normalize_emergency_email(email_value):
@@ -86,6 +118,7 @@ class SOSEvent(models.Model):
     user = models.CharField(max_length=150, db_index=True)
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
+    location_updated_at = models.DateTimeField(null=True, blank=True)
     activated_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     cancelled_at = models.DateTimeField(null=True, blank=True)
@@ -108,6 +141,34 @@ class SOSEvent(models.Model):
 
     def __str__(self):
         return '{} - {}'.format(self.user, self.status)
+
+
+class SOSLiveLocationShare(models.Model):
+    sos_event = models.OneToOneField(
+        SOSEvent,
+        on_delete=models.CASCADE,
+        related_name='live_location_share',
+    )
+    token_hash = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def is_valid(self):
+        return (
+            self.revoked_at is None
+            and self.expires_at > timezone.now()
+            and self.sos_event.status == SOSEvent.STATUS_ACTIVE
+        )
+
+    def revoke(self):
+        if self.revoked_at is None:
+            self.revoked_at = timezone.now()
+            self.save(update_fields=['revoked_at', 'updated_at'])
+
+    def __str__(self):
+        return 'Live location share for SOS {}'.format(self.sos_event_id)
 
 
 class SOSEmailDelivery(models.Model):
@@ -195,3 +256,210 @@ class SafetyTimer(models.Model):
             self.status = self.STATUS_EXPIRED
             self.completed_at = timezone.now()
             self.save(update_fields=['status', 'completed_at', 'updated_at'])
+
+
+class Journey(models.Model):
+    STATUS_PLANNED = 'PLANNED'
+    STATUS_ACTIVE = 'ACTIVE'
+    STATUS_OVERDUE = 'OVERDUE'
+    STATUS_COMPLETED = 'COMPLETED'
+    STATUS_CANCELLED = 'CANCELLED'
+    STATUS_CHOICES = (
+        (STATUS_PLANNED, 'Planned'),
+        (STATUS_ACTIVE, 'Active'),
+        (STATUS_OVERDUE, 'Overdue'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    )
+
+    user = models.CharField(max_length=150, db_index=True)
+    origin_label = models.CharField(max_length=255)
+    origin_latitude = models.FloatField()
+    origin_longitude = models.FloatField()
+    destination_label = models.CharField(max_length=255)
+    destination_latitude = models.FloatField()
+    destination_longitude = models.FloatField()
+    distance_meters = models.PositiveIntegerField()
+    estimated_duration_seconds = models.PositiveIntegerField()
+    planned_departure = models.DateTimeField()
+    expected_arrival = models.DateTimeField()
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PLANNED, db_index=True)
+    guardian_enabled = models.BooleanField(default=False)
+    guardian_contacts = models.ManyToManyField(EmergencyContact, blank=True, related_name='guarded_journeys')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return '{}: {} to {} ({})'.format(self.user, self.origin_label, self.destination_label, self.status)
+
+
+class JourneyActivity(models.Model):
+    ACTION_PLANNED = 'PLANNED'
+    ACTION_STARTED = 'STARTED'
+    ACTION_CHECKED_IN = 'CHECKED_IN'
+    ACTION_EXTENDED = 'EXTENDED'
+    ACTION_OVERDUE = 'OVERDUE'
+    ACTION_ENDED = 'ENDED'
+    ACTION_CANCELLED = 'CANCELLED'
+    ACTION_CHOICES = (
+        (ACTION_PLANNED, 'Planned'),
+        (ACTION_STARTED, 'Started'),
+        (ACTION_CHECKED_IN, 'Checked in safe'),
+        (ACTION_EXTENDED, 'Deadline extended'),
+        (ACTION_OVERDUE, 'Check-in overdue'),
+        (ACTION_ENDED, 'Journey ended'),
+        (ACTION_CANCELLED, 'Journey cancelled'),
+    )
+
+    journey = models.ForeignKey(Journey, on_delete=models.CASCADE, related_name='activities')
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    occurred_at = models.DateTimeField(default=timezone.now)
+    details = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['occurred_at', 'pk']
+
+    def __str__(self):
+        return '{}: {}'.format(self.journey_id, self.action)
+
+
+class JourneyCheckInAlert(models.Model):
+    STATUS_PENDING = 'PENDING'
+    STATUS_SENT = 'SENT'
+    STATUS_FAILED = 'FAILED'
+    STATUS_NO_RECIPIENTS = 'NO_RECIPIENTS'
+    STATUS_CHOICES = (
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_NO_RECIPIENTS, 'No eligible contacts'),
+    )
+
+    journey = models.ForeignKey(Journey, on_delete=models.CASCADE, related_name='checkin_alerts')
+    deadline_at = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-deadline_at']
+        unique_together = ('journey', 'deadline_at')
+
+    def __str__(self):
+        return '{} overdue at {}'.format(self.journey_id, self.deadline_at)
+
+
+class JourneyCheckInDelivery(models.Model):
+    STATUS_PENDING = 'PENDING'
+    STATUS_SENDING = 'SENDING'
+    STATUS_SENT = 'SENT'
+    STATUS_FAILED = 'FAILED'
+    STATUS_UNCERTAIN = 'UNCERTAIN'
+    STATUS_CHOICES = (
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_SENDING, 'Sending'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_UNCERTAIN, 'Uncertain'),
+    )
+
+    alert = models.ForeignKey(JourneyCheckInAlert, on_delete=models.CASCADE, related_name='deliveries')
+    contact = models.ForeignKey(EmergencyContact, on_delete=models.SET_NULL, null=True, blank=True)
+    recipient_email = models.EmailField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    attempted_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ['pk']
+        unique_together = ('alert', 'recipient_email')
+
+    def __str__(self):
+        return '{} -> {} ({})'.format(self.alert_id, self.recipient_email, self.status)
+
+
+class CommunityReport(models.Model):
+    CATEGORY_HARASSMENT = 'HARASSMENT'
+    CATEGORY_INFRASTRUCTURE = 'INFRASTRUCTURE'
+    CATEGORY_LIGHTING = 'LIGHTING'
+    CATEGORY_SUSPICIOUS_ACTIVITY = 'SUSPICIOUS_ACTIVITY'
+    CATEGORY_OTHER = 'OTHER'
+    CATEGORY_CHOICES = (
+        (CATEGORY_HARASSMENT, 'Harassment or intimidation'),
+        (CATEGORY_INFRASTRUCTURE, 'Unsafe infrastructure'),
+        (CATEGORY_LIGHTING, 'Poor lighting'),
+        (CATEGORY_SUSPICIOUS_ACTIVITY, 'Suspicious activity'),
+        (CATEGORY_OTHER, 'Other safety concern'),
+    )
+
+    STATUS_SUBMITTED = 'SUBMITTED'
+    STATUS_UNDER_REVIEW = 'UNDER_REVIEW'
+    STATUS_APPROVED = 'APPROVED'
+    STATUS_REJECTED = 'REJECTED'
+    STATUS_CHOICES = (
+        (STATUS_SUBMITTED, 'Submitted'),
+        (STATUS_UNDER_REVIEW, 'Under review'),
+        (STATUS_APPROVED, 'Approved'),
+        (STATUS_REJECTED, 'Rejected'),
+    )
+
+    reporter = models.CharField(max_length=150, db_index=True)
+    category = models.CharField(max_length=24, choices=CATEGORY_CHOICES)
+    description = models.TextField(max_length=2000)
+    approximate_latitude = models.FloatField()
+    approximate_longitude = models.FloatField()
+    incident_at = models.DateTimeField()
+    evidence = models.FileField(
+        upload_to=community_evidence_upload_path,
+        validators=[validate_community_evidence],
+        blank=True,
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_SUBMITTED, db_index=True)
+    moderation_note = models.CharField(max_length=500, blank=True)
+    moderated_by = models.CharField(max_length=150, blank=True)
+    moderated_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-incident_at', '-created_at']
+
+    def save(self, *args, **kwargs):
+        self.approximate_latitude = round(self.approximate_latitude, 2)
+        self.approximate_longitude = round(self.approximate_longitude, 2)
+        super(CommunityReport, self).save(*args, **kwargs)
+
+    def __str__(self):
+        return '{} report ({})'.format(self.get_category_display(), self.status)
+
+
+class CommunityReportFlag(models.Model):
+    STATUS_PENDING = 'PENDING'
+    STATUS_REVIEWED = 'REVIEWED'
+    STATUS_DISMISSED = 'DISMISSED'
+    STATUS_CHOICES = (
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_REVIEWED, 'Reviewed'),
+        (STATUS_DISMISSED, 'Dismissed'),
+    )
+
+    report = models.ForeignKey(CommunityReport, on_delete=models.CASCADE, related_name='flags')
+    reporter = models.CharField(max_length=150, db_index=True)
+    reason = models.CharField(max_length=255)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    reviewed_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ('report', 'reporter')
+
+    def __str__(self):
+        return 'Flag for report {} ({})'.format(self.report_id, self.status)

@@ -7,6 +7,7 @@ __pycache__/
 *.py[cod]
 *.sqlite3
 *.log
+private_uploads/
 .DS_Store
 .pytest_cache/
 .mypy_cache/
