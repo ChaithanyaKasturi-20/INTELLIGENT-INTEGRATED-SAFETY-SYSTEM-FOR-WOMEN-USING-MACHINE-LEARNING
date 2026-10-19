@@ -1,7 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.shortcuts import redirect, render
-from django.template import RequestContext
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.conf import settings
@@ -28,8 +27,7 @@ import pandas as pd
 import numpy as np
 import pickle
 import smtplib
-from datetime import date, timedelta
-import seaborn as sns
+from datetime import timedelta
 from django.utils import timezone
 
 from .models import EmergencyContact, SafetyTimer as SafetyTimerModel, SOSEvent, SOSEmailDelivery, SOSLiveLocationShare, normalize_emergency_email
@@ -311,13 +309,15 @@ def build_sos_live_location_url(token):
     return '{}#{}'.format(page_url, token) if page_url else ''
 
 
-def get_valid_sos_public_base_url():
+def get_sos_public_base_url_from_environment():
     load_local_env()
-    public_base_url = (
-        os.environ.get('SOS_PUBLIC_BASE_URL')
-        or getattr(settings, 'SOS_PUBLIC_BASE_URL', '')
-        or ''
-    ).strip().rstrip('/')
+    if 'SOS_PUBLIC_BASE_URL' in os.environ:
+        return (os.environ.get('SOS_PUBLIC_BASE_URL') or '').strip().rstrip('/')
+    return (getattr(settings, 'SOS_PUBLIC_BASE_URL', '') or '').strip().rstrip('/')
+
+
+def get_valid_sos_public_base_url():
+    public_base_url = get_sos_public_base_url_from_environment()
     try:
         parsed_base_url = urllib.parse.urlsplit(public_base_url)
         hostname = parsed_base_url.hostname
@@ -510,7 +510,7 @@ def send_sos_emails_for_event(sos_event, share_token=None, delivery_ids=None):
     ):
         return False
 
-    public_link_configured = bool(build_sos_live_location_url('configuration-check'))
+    public_link_configured = bool(get_valid_sos_public_base_url())
     if share_token is None and public_link_configured:
         try:
             share_token = create_sos_live_location_share(sos_event)
@@ -532,7 +532,7 @@ def send_sos_emails_for_event(sos_event, share_token=None, delivery_ids=None):
         ).values_list('emergency_contact_id', flat=True))
         eligible_contacts = [contact for contact in eligible_contacts if contact.pk in retry_contact_ids]
 
-    live_location_url = build_sos_live_location_url(share_token) if share_token else ''
+    live_location_url = build_sos_live_location_url(share_token) if share_token and get_valid_sos_public_base_url() else ''
 
     sender_email, sender_password = get_panic_email_config()
 
@@ -625,7 +625,8 @@ def ActivateSOS(request):
         activated_at=timezone.now(),
     )
     share_token = create_sos_live_location_share(event)
-    send_sos_emails_for_event(event, share_token=share_token)
+    configured_share_token = share_token if get_valid_sos_public_base_url() else None
+    send_sos_emails_for_event(event, share_token=configured_share_token)
     return redirect('SOSDashboard')
 
 

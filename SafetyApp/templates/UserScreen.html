@@ -58,6 +58,7 @@ progress:after {
 				{% if safety_timer %}
 					<p style="margin-top: 12px; margin-bottom: 0; font-weight: bold; color: #333;">Current status: {{ safety_timer.status }}</p>
 				{% endif %}
+				<p style="margin-top: 12px; margin-bottom: 0; color: #555;">More safety tools: <a href="{% url 'Journeys' %}">My Journeys</a> | <a href="{% url 'CommunityReports' %}">Community Reports</a></p>
 			</div>
 		<img src="data:image/png;base64, {{ img }}" alt="" />
 	

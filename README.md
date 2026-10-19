@@ -52,12 +52,12 @@ The repository includes [SCREENS.docx](./SCREENS.docx), which contains UI screen
 | Backend | Python 3.9 project setup; Django 2.1.7 |
 | Data | SQLite (`db.sqlite3`), with Django migrations for app models and a separate registration table created by application code |
 | Frontend | Django templates, HTML, CSS, and browser-side JavaScript |
-| Data/visualization libraries | Pandas, NumPy, Matplotlib, and Seaborn are imported by the application |
+| Data/visualization libraries | The application imports Pandas, NumPy, Matplotlib, and Pillow; the standalone `test.py` analysis script imports Seaborn. |
 | Maps | Leaflet, OpenStreetMap tiles, Nominatim geocoding, Overpass nearby-place queries, and the public OSRM routing endpoint |
 | Crime data | `Dataset/CrimesOnWomenData.csv` and the root-level `dstrCAW_2013.csv` |
 | Saved chart data | `model/model_history.pckl` |
 
-The current application source does not import TensorFlow, Keras, h5py, scikit-learn, or PyMySQL. Those packages appear in the legacy `requirements.txt`, but are not needed by the application paths described here. In particular, the configured database is SQLite, not MySQL.
+The current application source does not import TensorFlow, Keras, h5py, scikit-learn, or PyMySQL. Those packages were listed in an obsolete dependency file but are not needed by the current application paths. In particular, the configured database is SQLite, not MySQL.
 
 The mapping services are public third-party endpoints. Their availability and permitted use are subject to their policies:
 
@@ -78,7 +78,7 @@ Community report maps use Leaflet and OSM tiles. Their content is user-submitted
 - An internet connection for CDN-hosted Leaflet resources, OpenStreetMap tiles, and the geocoding, routing, and nearby-place services.
 - Optional: a Gmail account with an App Password if you want to try SOS email notifications.
 
-The project’s `requirements.txt` is a legacy list of shell commands beginning with `pip install`; it is not in the format accepted by `pip install -r`. It also pins an old TensorFlow 1.14 stack, which is not part of the current app imports and is not suitable for the Python 3.9 quick-start environment. The commands below install the packages used by the current application with the Python 3.9-compatible versions verified for this project.
+`requirements.txt` lists the pinned runtime dependencies used by the current application. The obsolete TensorFlow/Keras and MySQL packages are not required for the current features.
 
 ## Installation and configuration
 
@@ -92,10 +92,10 @@ py -3.9 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 python -m pip install --upgrade pip
-python -m pip install Django==2.1.7 numpy==1.26.4 pandas==2.2.3 matplotlib==3.9.2 seaborn==0.13.1 Pillow==10.4.0
+python -m pip install -r requirements.txt
 ```
 
-These are the runtime packages directly imported by the app. The old TensorFlow/Keras packages listed in `requirements.txt` are not needed to run the current pages; the chart endpoint uses a saved pickle file instead.
+The chart endpoint reads its saved accuracy-history pickle; it does not train a neural network at request time.
 
 If PowerShell blocks activation, allow it only for the current PowerShell process, then activate:
 
@@ -108,7 +108,7 @@ This does not change the machine-wide execution policy. Alternatively, skip acti
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install Django==2.1.7 numpy==1.26.4 pandas==2.2.3 matplotlib==3.9.2 seaborn==0.13.1 Pillow==10.4.0
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 ### Environment variables and email
@@ -143,7 +143,7 @@ python manage.py migrate
 
 No `makemigrations` step is needed for a normal first run; apply the migrations already in `SafetyApp/migrations/`. The application creates its separate `register` table on demand when registration/login code accesses it.
 
-The `0005_auto_20261011_0843.py` migration adds journey plans/activity/check-in audit records and moderated community reports/flags. It does not remove existing tables or records. Keep an existing SQLite database in place and apply migrations normally.
+The `0005_auto_20261011_0843.py` migration adds journey plans/activity/check-in audit records and moderated community reports/flags. The `0006_auto_20261011_1154.py` migration adds SOS live-location sharing tokens and the latest-location timestamp. These migrations do not remove existing tables or records. Keep an existing SQLite database in place and apply migrations normally.
 
 `db.sqlite3` is ignored by Git and is not supplied as a portable developer database. Migration creates the Django-managed tables; it does not create a demo account. If a local `db.sqlite3` already exists, it may contain user data—keep it and do not delete or reset it as routine setup.
 
@@ -217,13 +217,45 @@ To include the optional secure recipient link, set `SOS_PUBLIC_BASE_URL` in the 
 
 Each SOS gets a cryptographically random, event-specific 24-hour access token. Only its SHA-256 hash is stored. The raw token is placed in the URL fragment, removed from the recipient page's address bar immediately, and never sent to the location API as a URL parameter. Every location read checks the token, expiry, revocation, and active SOS state. Responses are non-cacheable and rate-limited. Resolving/cancelling the SOS revokes the link. The owner update endpoint is authenticated and updates only that owner's active SOS.
 
-**Do not point a public tunnel directly at port 8000.** That would expose the rest of the development site as well as the recipient page. A temporary demo must use a trusted, path-filtering reverse proxy or named tunnel ingress which forwards only `/SOS/LiveLocation`, `/SOS/LiveLocation/Data`, and (only if the owner uses the public origin for tracking) `/SOS/LocationUpdate`; send all other paths to a 404 response. Do not expose `/admin`, login/registration, or the full development server. A Cloudflare Quick Tunnel directly to `http://localhost:8000` does not provide this path restriction and is not appropriate for this project. Use a stable, controlled hostname and an HTTPS tunnel with path allowlisting; update `SOS_PUBLIC_BASE_URL` whenever its hostname changes. A local tunnel is for demos only, not production.
+**Do not point a public tunnel directly at Django port 8000.** The small standard-library proxy in `scripts/sos_location_proxy.py` listens only on `127.0.0.1:8765` and forwards only `GET /SOS/LiveLocation` and JSON `POST /SOS/LiveLocation/Data`. Paths (including query strings and trailing-slash variants) outside that exact allowlist return 404; other methods return 405. It ignores client-supplied host, cookie, authorization, CSRF, and forwarding headers, uses the fixed upstream host `127.0.0.1:8000`, forwards only the JSON content type, and returns only a small response-header allowlist. It does not relay Django 5xx/debug error pages. The recipient data endpoint is read-only and validates its event-specific token; it does not require a session cookie or CSRF token. Django's global CSRF middleware remains enabled, and the owner location-update endpoint is deliberately not exposed by this proxy.
+
+To run a temporary local demo, from the repository root:
+
+1. Keep Django running on `127.0.0.1:8000`. Do not change `DEBUG`, middleware, or Django authentication/CSRF settings for the tunnel.
+2. In a PowerShell terminal, start the proxy:
+
+   ```powershell
+   py -3.9 scripts\sos_location_proxy.py
+   ```
+
+3. In a separate PowerShell terminal, start the Quick Tunnel:
+
+   ```powershell
+   cloudflared tunnel --url http://127.0.0.1:8765
+   ```
+
+4. Copy only the generated `https://<random-name>.trycloudflare.com` origin into the private `.env` as `SOS_PUBLIC_BASE_URL=https://<random-name>.trycloudflare.com`, then restart Django. Replace the hostname with the actual value Cloudflare printed; never paste secrets or commit the tunnel URL. The hostname may change each time a Quick Tunnel starts. The proxy must be running before the tunnel can reach the app.
+5. Stop the proxy with `Ctrl+C` in its terminal. Alternatively, from another PowerShell terminal, stop the listener only if its command line identifies this proxy script:
+
+   ```powershell
+   $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+   if ($listener) {
+       $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)"
+       if ($owner.CommandLine -match 'scripts[\\/]+sos_location_proxy\.py') {
+           Stop-Process -Id $listener.OwningProcess
+       } else {
+           throw 'Port 8765 is not owned by the SOS location proxy.'
+       }
+   }
+   ```
+
+The tunnel serves only the two recipient paths allowed by the local proxy; it does not expose `/admin`, authentication, registration, SOS activation, or owner GPS updates. A Quick Tunnel is temporary and is not production infrastructure. This does not itself test location sharing or send any email.
 
 The browser requests permission and coordinates when SOS is activated, then watches for changes while an active SOS page remains open. It posts on movement or at most every two minutes. The browser/device can pause location updates when suspended, locked, offline, or closed; recipients see when the last position is stale. The Safety Timer's existing expiry check creates the same SOS and sharing workflow when the Safety Timer page is visited after expiry; timer expiry is not a background scheduled event.
 
 ## Testing and verification
 
-Run Django’s system check and app test suite with:
+Run Django’s system check and app test suite from a disposable source copy, not from a working directory whose `db.sqlite3` contains personal data. Some legacy tests access the separate `register` table through a direct SQLite connection, outside Django’s temporary test database. Exclude the real `.env`, `db.sqlite3`, and uploaded data from the copy, and clear inherited SMTP environment variables before running tests.
 
 ```powershell
 python manage.py check
@@ -231,9 +263,7 @@ python manage.py shell -c "from SafetyApp.views import ensure_register_table; en
 python manage.py test SafetyApp
 ```
 
-The registration-table initialization is needed in a fresh clone because several tests access the project-root SQLite table directly before the normal login/registration flow creates it. The tests also insert test registration rows outside Django’s isolated test database. Run these commands in a clean clone or disposable copy before adding personal data; do not point tests at a database containing user data.
-
-Verified with Python 3.9/Django 2.1.7: all 65 app tests passed in a disposable source copy after initializing its separate `register` table. Exclude the real `db.sqlite3` and `.env` when making a test copy: legacy tests write to the project's separate registration table outside Django's temporary test database. The live project schema migration is additive; never run the suite against a database containing personal registration records.
+The table initialization and test fixtures write to the copy's own SQLite file because the legacy registration table uses direct SQLite access outside Django's temporary test database. Run this only in the disposable copy, never against a database containing personal data. Do not reset or flush a personal database to prepare for tests.
 
 Automated tests do not verify real GPS accuracy, map-provider availability, external API policy compliance, or end-to-end email delivery. Manually test browser location permission, maps, and email using non-sensitive test accounts.
 
@@ -247,14 +277,12 @@ Automated tests do not verify real GPS accuracy, map-provider availability, exte
 ├── database.txt
 ├── dstrCAW_2013.csv
 ├── Dataset/
-│   ├── CrimesOnWomenData.csv
-│   └── model_history.pckl
+│   └── CrimesOnWomenData.csv
 ├── model/
 │   └── model_history.pckl
 ├── Safety/
 │   ├── settings.py
 │   ├── urls.py
-│   ├── asgi.py
 │   └── wsgi.py
 └── SafetyApp/
     ├── migrations/
@@ -262,7 +290,8 @@ Automated tests do not verify real GPS accuracy, map-provider availability, exte
     │   ├── 0002_sosevent.py
     │   ├── 0003_auto_20260912_2319.py
     │   ├── 0004_safetytimer.py
-    │   └── 0005_auto_20261011_0843.py
+    │   ├── 0005_auto_20261011_0843.py
+    │   └── 0006_auto_20261011_1154.py
     ├── static/
     ├── templates/
     ├── admin.py
@@ -274,8 +303,9 @@ Automated tests do not verify real GPS accuracy, map-provider availability, exte
     ├── journey_notifications.py
     ├── community_views.py
     ├── management/commands/process_overdue_journeys.py
-    ├── tests.py
     ├── test_emergency_contacts.py
+    ├── test_registration.py
+    ├── test_sos_live_location.py
     ├── test_safety_timer.py
     └── test_journey_community.py
 ```
@@ -284,8 +314,9 @@ Automated tests do not verify real GPS accuracy, map-provider availability, exte
 - `SafetyApp/` contains the application models, views, routes, migrations, templates, static files, and tests.
 - `Dataset/CrimesOnWomenData.csv` and `dstrCAW_2013.csv` provide the bundled historical crime data.
 - `model/model_history.pckl` stores the accuracy history plotted by `TrainML`.
+- `scripts/` contains the path-restricted SOS recipient proxy and its focused tests.
 - The root `db.sqlite3`, `.env`, and virtual environments are local files and are not included in this tree.
-- `Dataset/model_history.pckl` is also present in the repository, but the current chart view reads `model/model_history.pckl`.
+- `requirements.txt` contains the current runtime dependency pins. `test.py` is a standalone legacy data-analysis script, not a Django management command.
 
 ## Security and privacy
 
@@ -322,7 +353,7 @@ Possible future improvements (not implemented) include:
 | --- | --- |
 | `py` or Python is not found | Install Python 3.9 and the Windows Python launcher, reopen PowerShell, and verify with `py -3.9 --version`. |
 | Virtual-environment activation is blocked | Use the process-only policy command above, or invoke `.\.venv\Scripts\python.exe` directly. |
-| `pip install -r requirements.txt` fails | The checked-in file contains `pip install ...` shell commands, not valid requirement entries. Use the explicit runtime installation commands in this README. |
+| Dependency installation fails | Activate `.venv` and run `python -m pip install -r requirements.txt`; check that the selected interpreter is Python 3.9. |
 | Django cannot import a required package | Activate `.venv` and install the runtime package set shown above with `python -m pip install ...`. Avoid installing the legacy TensorFlow 1.14 pins into Python 3.9. |
 | Migration reports unapplied migrations | Run `python manage.py migrate` from the repository root and review the full error. Do not delete or flush the database. |
 | Missing `register` table | Open the app through its registration/login flow; application code creates this table on demand. |

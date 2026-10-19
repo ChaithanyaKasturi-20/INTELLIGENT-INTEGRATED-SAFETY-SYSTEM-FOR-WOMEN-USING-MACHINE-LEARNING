@@ -26,14 +26,16 @@
 <body>
   <div id="header">
     <div id="logo"><h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1></div>
-    <div id="menu"><ul>
-      <li><a href="{% url 'Route' %}">Safe Places</a></li>
-      <li><a href="{% url 'Journeys' %}">My Journeys</a></li>
-      <li><a href="{% url 'CommunityReports' %}">Community Reports</a></li>
-      <li><a href="{% url 'EmergencyContacts' %}">Emergency Contacts</a></li>
-      <li><a href="{% url 'Panic' %}">SOS</a></li>
-      <li><a href="{% url 'Logout' %}">Logout</a></li>
-    </ul></div>
+    <div id="menu">
+      <ul>
+        <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
+        <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
+        <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
+        <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
+        <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
+        <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
+      </ul>
+    </div>
   </div>
   <main class="reports-wrap">
     <h1>Community Safety Reports</h1>
