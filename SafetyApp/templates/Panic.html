@@ -92,6 +92,24 @@ button.emergency {
   color: #555;
   font-size: 14px;
 }
+.followed-mode-card {
+  margin: 20px 0;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #d9c7c7;
+  border-left: 5px solid #8c0209;
+  border-radius: 10px;
+}
+.followed-mode-card h3 {
+  margin-top: 0;
+  color: #4c2023;
+}
+.followed-mode-card button {
+  background: #8c0209;
+}
+.followed-mode-card button:hover {
+  background: #6f0006;
+}
 .section-divider {
   border: 0;
   border-top: 1px solid #d9d9d9;
@@ -231,6 +249,17 @@ button.emergency {
             <p class="status-box" role="status">{{ message }}</p>
           {% endfor %}
         {% endif %}
+
+        <section class="followed-mode-card" aria-labelledby="followedModeTitle">
+          <h3 id="followedModeTitle">I'm Being Followed</h3>
+          <p>Start a five-minute safety timer while you move toward a public, well-lit place. Starting this mode does not activate SOS; if the timer expires, escalation is processed when this app is open or next visited, not by background monitoring.</p>
+          <form method="post" action="{% url 'SafetyTimerAction' %}">
+            {% csrf_token %}
+            <input type="hidden" name="mode" value="FOLLOWED" />
+            <input type="hidden" name="duration" value="5" />
+            <button type="submit">Start five-minute timer</button>
+          </form>
+        </section>
 
         {% if active_event %}
           <div class="status-box active-status">

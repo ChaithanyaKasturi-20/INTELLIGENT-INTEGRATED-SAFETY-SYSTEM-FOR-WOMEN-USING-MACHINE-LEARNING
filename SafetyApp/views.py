@@ -34,6 +34,9 @@ from .models import EmergencyContact, SafetyTimer as SafetyTimerModel, SOSEvent,
 
 logger = logging.getLogger(__name__)
 
+FOLLOWED_MODE_SESSION_KEY = 'safety_timer_mode'
+FOLLOWED_MODE = 'FOLLOWED'
+
 global username, email
 dataset = pd.read_csv("Dataset/CrimesOnWomenData.csv")
 states = np.unique(dataset['State'])
@@ -197,6 +200,8 @@ def SafetyTimer(request):
     return render(request, 'SafetyTimer.html', {
         'current_user': current_user,
         'timer': timer,
+        'followed_mode': request.session.get(FOLLOWED_MODE_SESSION_KEY) == FOLLOWED_MODE,
+        'duration_options': (5, 10, 15, 30),
         'active_event': active_event,
         'emergency_contact_count': EmergencyContact.objects.filter(user=current_user, is_active=True).count(),
         'delivery_summary': get_sos_delivery_summary(active_event),
@@ -212,12 +217,16 @@ def SafetyTimerAction(request):
     if redirect_response is not None:
         return redirect_response
 
-    duration_value = request.POST.get('duration', '15')
-    try:
-        duration_minutes = int(duration_value)
-    except (TypeError, ValueError):
-        duration_minutes = 15
-    duration_minutes = max(1, duration_minutes)
+    followed_mode = request.POST.get('mode') == FOLLOWED_MODE
+    if followed_mode:
+        duration_minutes = 5
+    else:
+        duration_value = request.POST.get('duration', '15')
+        try:
+            duration_minutes = int(duration_value)
+        except (TypeError, ValueError):
+            duration_minutes = 15
+        duration_minutes = max(1, duration_minutes)
 
     SafetyTimerModel.objects.filter(user=current_user, status=SafetyTimerModel.STATUS_ACTIVE).update(
         status=SafetyTimerModel.STATUS_CANCELLED,
@@ -231,6 +240,10 @@ def SafetyTimerAction(request):
         duration=duration_minutes,
         status=SafetyTimerModel.STATUS_ACTIVE,
     )
+    if followed_mode:
+        request.session[FOLLOWED_MODE_SESSION_KEY] = FOLLOWED_MODE
+    else:
+        request.session.pop(FOLLOWED_MODE_SESSION_KEY, None)
     return redirect('SafetyTimer')
 
 
@@ -251,6 +264,7 @@ def SafetyTimerSafe(request):
         resolve_sos_event(event)
         messages.success(request, 'SOS resolved. Location updates and recipient access have ended.')
 
+    request.session.pop(FOLLOWED_MODE_SESSION_KEY, None)
     return redirect('SafetyTimer')
 
 
@@ -266,6 +280,7 @@ def SafetyTimerCancel(request):
     if timer is not None and timer.status == SafetyTimerModel.STATUS_ACTIVE:
         timer.mark_cancelled()
 
+    request.session.pop(FOLLOWED_MODE_SESSION_KEY, None)
     return redirect('SafetyTimer')
 
 
@@ -663,6 +678,7 @@ def UpdateSOSStatus(request):
     elif status_value == SOSEvent.STATUS_RESOLVED:
         resolve_sos_event(event)
         messages.success(request, 'SOS resolved. Location updates and recipient access have ended.')
+        request.session.pop(FOLLOWED_MODE_SESSION_KEY, None)
 
     return redirect('SOSDashboard')
 

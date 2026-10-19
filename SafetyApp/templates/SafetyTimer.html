@@ -140,9 +140,15 @@ button.safe {
           </div>
         {% elif timer and timer.status == 'ACTIVE' %}
           <div class="status-box active-status">
-            <p><strong>Status:</strong> <span class="warning">SAFETY TIMER ACTIVE</span></p>
+            {% if followed_mode %}
+              <p><strong>I'm Being Followed mode active</strong></p>
+              <p class="small-note">Five-minute safety timer</p>
+            {% else %}
+              <p><strong>Status:</strong> <span class="warning">SAFETY TIMER ACTIVE</span></p>
+            {% endif %}
             <div id="countdownDisplay" class="countdown-number">00:00</div>
             <p class="small-note">Expires: <span id="expiryDisplay">--</span></p>
+            <p class="small-note">Expiry processing runs when this page is open or next visited; this is not background monitoring.</p>
             <div style="margin-top: 20px;">
               <form method="post" action="{% url 'SafetyTimerSafe' %}" style="display: inline;">
                 {% csrf_token %}

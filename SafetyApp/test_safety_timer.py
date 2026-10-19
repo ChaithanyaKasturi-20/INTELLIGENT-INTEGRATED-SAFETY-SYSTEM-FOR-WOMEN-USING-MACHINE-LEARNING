@@ -35,6 +35,126 @@ class SafetyTimerTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(SafetyTimer.objects.filter(user=self.username, status=SafetyTimer.STATUS_ACTIVE).exists())
 
+    @patch('SafetyApp.views.send_sos_emails_for_event')
+    def test_followed_mode_starts_a_fixed_five_minute_timer_without_sos(self, mock_send_sos_emails):
+        response = self.client.post('/SafetyTimerAction', {
+            'mode': 'FOLLOWED',
+            'duration': '99',
+        })
+
+        timer = SafetyTimer.objects.get(user=self.username, status=SafetyTimer.STATUS_ACTIVE)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(timer.duration, 5)
+        self.assertEqual(self.client.session.get('safety_timer_mode'), 'FOLLOWED')
+        self.assertFalse(SOSEvent.objects.filter(user=self.username).exists())
+        mock_send_sos_emails.assert_not_called()
+
+    @patch('SafetyApp.views.get_signup_emergency_contact_for_user', return_value=None)
+    def test_panic_page_offers_accessible_post_form_for_followed_mode(self, mock_signup_contact):
+        response = self.client.get('/Panic')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<h3 id=\"followedModeTitle\">I'm Being Followed</h3>", html=True)
+        self.assertContains(response, 'action="/SafetyTimerAction"')
+        self.assertContains(response, 'method="post"')
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertContains(response, 'name="mode" value="FOLLOWED"')
+        self.assertContains(response, 'name="duration" value="5"')
+        self.assertContains(response, 'not by background monitoring')
+
+    @patch('SafetyApp.views.process_expired_safety_timer_for_user', return_value=None)
+    @patch('SafetyApp.views.send_sos_emails_for_event')
+    def test_followed_timer_page_shows_mode_status_countdown_and_existing_actions(
+        self, mock_send_sos_emails, mock_process_expiry
+    ):
+        self.client.post('/SafetyTimerAction', {'mode': 'FOLLOWED'})
+
+        response = self.client.get('/SafetyTimer')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "I'm Being Followed mode active")
+        self.assertContains(response, 'Five-minute safety timer')
+        self.assertContains(response, "I'M SAFE")
+        self.assertContains(response, 'CANCEL TIMER')
+        self.assertContains(response, 'not background monitoring')
+        mock_process_expiry.assert_called_once()
+        mock_send_sos_emails.assert_not_called()
+
+    def test_normal_timer_start_clears_followed_mode_and_keeps_requested_duration(self):
+        session = self.client.session
+        session['safety_timer_mode'] = 'FOLLOWED'
+        session.save()
+
+        response = self.client.post('/SafetyTimerAction', {'duration': '15'})
+
+        timer = SafetyTimer.objects.get(user=self.username, status=SafetyTimer.STATUS_ACTIVE)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(timer.duration, 15)
+        self.assertNotIn('safety_timer_mode', self.client.session)
+
+    def test_safe_confirmation_clears_followed_mode(self):
+        session = self.client.session
+        session['safety_timer_mode'] = 'FOLLOWED'
+        session.save()
+        timer = SafetyTimer.objects.create(
+            user=self.username,
+            duration=5,
+            started_at=timezone.now(),
+            expires_at=timezone.now() + timedelta(minutes=5),
+            status=SafetyTimer.STATUS_ACTIVE,
+        )
+
+        response = self.client.post('/SafetyTimerSafe')
+
+        self.assertEqual(response.status_code, 302)
+        timer.refresh_from_db()
+        self.assertEqual(timer.status, SafetyTimer.STATUS_COMPLETED)
+        self.assertNotIn('safety_timer_mode', self.client.session)
+
+    def test_sos_safe_confirmation_clears_followed_mode_and_resolves_event(self):
+        session = self.client.session
+        session['safety_timer_mode'] = 'FOLLOWED'
+        session.save()
+        event = SOSEvent.objects.create(
+            user=self.username,
+            status=SOSEvent.STATUS_ACTIVE,
+        )
+
+        response = self.client.post('/UpdateSOSStatus', {'status': 'RESOLVED'})
+
+        self.assertEqual(response.status_code, 302)
+        event.refresh_from_db()
+        self.assertEqual(event.status, SOSEvent.STATUS_RESOLVED)
+        self.assertNotIn('safety_timer_mode', self.client.session)
+
+    def test_cancel_timer_clears_followed_mode(self):
+        session = self.client.session
+        session['safety_timer_mode'] = 'FOLLOWED'
+        session.save()
+        timer = SafetyTimer.objects.create(
+            user=self.username,
+            duration=5,
+            started_at=timezone.now(),
+            expires_at=timezone.now() + timedelta(minutes=5),
+            status=SafetyTimer.STATUS_ACTIVE,
+        )
+
+        response = self.client.post('/SafetyTimerCancel')
+
+        self.assertEqual(response.status_code, 302)
+        timer.refresh_from_db()
+        self.assertEqual(timer.status, SafetyTimer.STATUS_CANCELLED)
+        self.assertNotIn('safety_timer_mode', self.client.session)
+
+    def test_starting_followed_mode_requires_login(self):
+        response = Client().post('/SafetyTimerAction', {
+            'mode': 'FOLLOWED',
+            'duration': '5',
+        })
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SafetyTimer.objects.exists())
+
     def test_timer_is_associated_with_the_correct_user(self):
         created = SafetyTimer.objects.create(
             user=self.username,
