@@ -6,3 +6,4 @@ matplotlib==3.9.2
 seaborn==0.13.1
 Pillow==10.4.0
 gunicorn==23.0.0
+whitenoise==4.1.4

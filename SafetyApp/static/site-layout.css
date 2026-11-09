@@ -1907,9 +1907,12 @@ body.site-body.home-dashboard .home-hero {
 }
 
 body.site-body.home-dashboard .home-hero-mark img {
-  width: 128%;
+  width: 100%;
+  height: 100%;
   max-width: none;
-  flex: 0 0 128%;
+  flex: 0 1 auto;
+  object-fit: contain;
+  object-position: center right;
 }
 
 body.site-body.home-dashboard .home-feature-grid {
@@ -2139,8 +2142,9 @@ body.site-body.home-dashboard .home-activity-card .dashboard-section-heading a {
   }
 
   body.site-body.home-dashboard .home-hero-mark img {
-    width: 128%;
-    flex-basis: 128%;
+    width: 100%;
+    max-width: 100%;
+    flex-basis: auto;
   }
 
   body.site-body.home-dashboard .home-feature-grid {
@@ -2176,13 +2180,13 @@ body.site-body.home-dashboard .home-activity-card .dashboard-section-heading a {
   }
 
   body.site-body.home-dashboard .home-hero-mark img {
-    width: 120%;
+    width: 100%;
     height: auto;
-    max-width: none;
-    flex-basis: 120%;
+    max-width: 100%;
+    flex-basis: auto;
     min-height: 0;
-    transform: translateX(-20%);
-    object-position: right bottom;
+    transform: none;
+    object-position: center;
   }
 
   body.site-body.home-dashboard .home-feature-grid,

@@ -14,6 +14,8 @@ import os
 import sys
 from urllib.parse import urlsplit
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,21 +27,50 @@ if 'check_exotel_config' not in sys.argv[1:]:
                 _line = _line.strip()
                 if _line and not _line.startswith('#') and '=' in _line:
                     _key, _value = _line.split('=', 1)
-                    if _key.strip() == 'SOS_PUBLIC_BASE_URL':
+                    if _key.strip() in {
+                        'DJANGO_ENV',
+                        'DJANGO_DEBUG',
+                        'DJANGO_SECRET_KEY',
+                        'SOS_PUBLIC_BASE_URL',
+                    }:
                         os.environ.setdefault(
-                            'SOS_PUBLIC_BASE_URL',
+                            _key.strip(),
                             _value.strip().strip('"').strip("'"),
                         )
-                        break
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/2.0/howto/deployment/checklist/
+DJANGO_ENV = os.environ.get('DJANGO_ENV', 'development').strip().lower()
+if DJANGO_ENV not in ('development', 'production'):
+    raise ImproperlyConfigured(
+        'DJANGO_ENV must be either "development" or "production".'
+    )
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'uf7dczb7r5z-i%%h4w95xf5jyosd!rn+62=t+k!_&#-tu8#$2p'
+_debug_value = os.environ.get('DJANGO_DEBUG')
+if _debug_value is None:
+    DEBUG = DJANGO_ENV != 'production'
+else:
+    _normalized_debug_value = _debug_value.strip().lower()
+    if _normalized_debug_value not in (
+        'true',
+        'false',
+        '1',
+        '0',
+        'yes',
+        'no',
+        'on',
+        'off',
+    ):
+        raise ImproperlyConfigured(
+            'DJANGO_DEBUG must be a boolean value.'
+        )
+    DEBUG = _normalized_debug_value in ('true', '1', 'yes', 'on')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    if DJANGO_ENV == 'production':
+        raise ImproperlyConfigured(
+            'DJANGO_SECRET_KEY must be configured in production.'
+        )
+    SECRET_KEY = 'django-insecure-local-development-only-not-for-production'
 
 SOS_PUBLIC_BASE_URL = os.environ.get('SOS_PUBLIC_BASE_URL', '').strip().rstrip('/')
 _sos_public_host = ''
@@ -81,6 +112,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -158,4 +190,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.0/howto/static-files/
 
 STATIC_URL = '/static/'
+STATIC_ROOT = os.environ.get(
+    'STATIC_ROOT',
+    os.path.join(BASE_DIR, 'staticfiles'),
+)
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'private_uploads')
