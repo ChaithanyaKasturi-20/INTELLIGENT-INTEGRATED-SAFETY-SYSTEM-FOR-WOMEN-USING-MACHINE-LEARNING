@@ -11,24 +11,26 @@ https://docs.djangoproject.com/en/2.0/ref/settings/
 """
 
 import os
+import sys
 from urllib.parse import urlsplit
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-_local_env_path = os.path.join(BASE_DIR, '.env')
-if os.path.isfile(_local_env_path):
-    with open(_local_env_path, 'r', encoding='utf-8') as _local_env_file:
-        for _line in _local_env_file:
-            _line = _line.strip()
-            if _line and not _line.startswith('#') and '=' in _line:
-                _key, _value = _line.split('=', 1)
-                if _key.strip() == 'SOS_PUBLIC_BASE_URL':
-                    os.environ.setdefault(
-                        'SOS_PUBLIC_BASE_URL',
-                        _value.strip().strip('"').strip("'"),
-                    )
-                    break
+if 'check_exotel_config' not in sys.argv[1:]:
+    _local_env_path = os.path.join(BASE_DIR, '.env')
+    if os.path.isfile(_local_env_path):
+        with open(_local_env_path, 'r', encoding='utf-8') as _local_env_file:
+            for _line in _local_env_file:
+                _line = _line.strip()
+                if _line and not _line.startswith('#') and '=' in _line:
+                    _key, _value = _line.split('=', 1)
+                    if _key.strip() == 'SOS_PUBLIC_BASE_URL':
+                        os.environ.setdefault(
+                            'SOS_PUBLIC_BASE_URL',
+                            _value.strip().strip('"').strip("'"),
+                        )
+                        break
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/2.0/howto/deployment/checklist/
@@ -57,9 +59,9 @@ except ValueError:
     pass
 
 ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "sega-arrives-made-tar.trycloudflare.com",
+    'intelligent-integrated-safety-system-for.onrender.com',
+    'localhost',
+    '127.0.0.1',
 ]
 if _sos_public_host and _sos_public_host not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(_sos_public_host)
