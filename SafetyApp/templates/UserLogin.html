@@ -1,69 +1,98 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>User Login | Intelligent Integrated Safety System</title>
-  <link href="{% static 'default.css' %}?v=20261011-4" rel="stylesheet" type="text/css" media="screen" />
-</head>
-<body class="public-page" style="background-image: url('{% static 'images/back.jpg' %}');">
-  <header id="header" class="public-header">
-    <div id="logo">
-      <h1>Intelligent Integrated Safety System for Women Using Machine Learning</h1>
-    </div>
-    <nav id="menu" aria-label="Main navigation">
-      <ul id="main">
-        <li><a href="{% url 'index' %}">Home</a></li>
-        <li class="current_page_item"><a href="{% url 'UserLogin' %}" aria-current="page">User Login Here</a></li>
-        <li><a href="{% url 'Register' %}">New User Signup Here</a></li>
-      </ul>
-    </nav>
-  </header>
-
-  <div id="wrapper">
-    <main id="page">
-      <div id="content" class="public-content public-home-panel">
-        <div class="flower">
-          <img class="public-banner" src="{% static 'images/tra.jpg' %}" alt="" />
-        </div>
-        <section class="auth-panel" aria-labelledby="login-title">
-          <h2 id="login-title">User Login</h2>
-          {% for message in messages %}
-            <p class="auth-feedback {{ message.tags }}" role="status" aria-live="polite">{{ message }}</p>
-          {% endfor %}
-          {% if data %}
-            <p class="auth-feedback" role="status" aria-live="polite">{{ data }}</p>
-          {% endif %}
-          <form class="auth-form" name="f1" method="post" action="{% url 'UserLoginAction' %}" onsubmit="return validate(this)">
-            {% csrf_token %}
-            <label for="login-username">Username</label>
-            <input id="login-username" type="text" name="t1" autocomplete="username" required />
-
-            <label for="login-password">Password</label>
-            <input id="login-password" type="password" name="t2" autocomplete="current-password" required />
-
-            <button type="submit">Login</button>
-          </form>
+{% block title %}User Login | Intelligent Integrated Safety System{% endblock %}
+{% block page_head %}
+{% endblock %}
+{% block body_class %}public-page login-page{% endblock %}
+{% block content %}
+<div id="wrapper">
+    <div id="page">
+      <div id="content" class="public-content public-auth-layout">
+        <section class="auth-shell" aria-labelledby="login-title">
+          <div class="auth-panel auth-form-panel">
+            <div class="auth-brand">
+              <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 2.5 19 5v6.2c0 4.7-2.9 8.2-7 10.3-4.1-2.1-7-5.6-7-10.3V5l7-2.5Z"/><path d="m8.6 12 2.1 2.1 4.7-4.7"/></svg>
+              </span>
+              <span>Women's Safety</span>
+            </div>
+            <div class="auth-heading">
+              <h2 id="login-title">Welcome Back!</h2>
+              <p>Sign in to access your personal safety dashboard.</p>
+            </div>
+            {% for message in messages %}
+              <p class="auth-feedback {{ message.tags }}" role="status" aria-live="polite">{{ message }}</p>
+            {% endfor %}
+            {% if data %}
+              <p class="auth-feedback error" role="status" aria-live="polite">{{ data }}</p>
+            {% endif %}
+            <form class="auth-form" name="f1" method="post" action="{% url 'UserLoginAction' %}" onsubmit="return validate(this)">
+              {% csrf_token %}
+              <div class="auth-field">
+                <label for="login-username">Username</label>
+                <div class="auth-input-wrap">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"/></svg>
+                  <input id="login-username" type="text" name="t1" autocomplete="username" placeholder="Enter your username" required />
+                </div>
+              </div>
+              <div class="auth-field">
+                <label for="login-password">Password</label>
+                <div class="auth-input-wrap">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                  <input id="login-password" type="password" name="t2" autocomplete="current-password" placeholder="Enter your password" required />
+                  <button class="password-toggle" type="button" data-password-target="login-password" aria-label="Show password" aria-pressed="false">
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>
+              <button class="auth-submit" type="submit"><span>Sign In</span></button>
+            </form>
+            <p class="auth-switch">Don't have an account? <a href="{% url 'Register' %}">Sign Up</a></p>
+          </div>
+          <div class="auth-visual" aria-label="Women's Safety protection illustration">
+            <div class="security-art" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="glass-shield">
+                <svg viewBox="0 0 160 180"><defs><linearGradient id="loginShield" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff" stop-opacity=".98"/><stop offset="1" stop-color="#ffcdd3" stop-opacity=".88"/></linearGradient></defs><path fill="url(#loginShield)" d="M80 8 142 30v48c0 50-25 78-62 94-37-16-62-44-62-94V30l62-22Z"/><path fill="#d9232e" d="m80 30 43 15v33c0 36-17 59-43 74-26-15-43-38-43-74V45l43-15Z"/><path fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" d="m58 90 14 14 31-34"/></svg>
+              </span>
+            </div>
+            <div class="auth-visual-copy">
+              <h3>Your Safety, Our Priority</h3>
+              <p>Stay connected, access emergency assistance, manage trusted contacts and make safer journeys with confidence.</p>
+            </div>
+            <span class="auth-tagline">SAFE <b>•</b> SECURE <b>•</b> CONNECTED</span>
+          </div>
         </section>
       </div>
-    </main>
+    </div>
   </div>
 
   <script>
     function validate(formObj) {
       if (formObj.t1.value.length === 0) {
-        alert("Please Enter username");
         formObj.t1.focus();
         return false;
       }
       if (formObj.t2.value.length === 0) {
-        alert("Please Enter password");
         formObj.t2.focus();
         return false;
       }
+      var submit = formObj.querySelector('.auth-submit');
+      submit.classList.add('is-loading');
+      submit.setAttribute('aria-busy', 'true');
+      submit.querySelector('span').textContent = 'Signing in...';
       return true;
     }
+
+    document.querySelectorAll('.password-toggle').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var input = document.getElementById(button.dataset.passwordTarget);
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+        button.setAttribute('aria-pressed', show ? 'true' : 'false');
+      });
+    });
   </script>
-</body>
-</html>
+{% endblock %}

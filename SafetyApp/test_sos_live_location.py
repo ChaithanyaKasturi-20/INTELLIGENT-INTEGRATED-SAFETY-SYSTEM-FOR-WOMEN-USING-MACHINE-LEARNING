@@ -1,20 +1,34 @@
-import hashlib
 import json
 import os
 from datetime import timedelta
-from urllib.parse import urlsplit
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from unittest.mock import patch
 
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from .models import EmergencyContact, SafetyTimer, SOSEmailDelivery, SOSEvent, SOSLiveLocationShare
-from .views import build_sos_live_location_url, create_sos_live_location_share
+from .models import (
+    EmergencyContact,
+    SafetyTimer,
+    SOSEmailDelivery,
+    SOSEvent,
+    SOSLiveLocationShare,
+    SOSNotificationAttempt,
+)
+from .views import (
+    activate_sos_event_for_user,
+    build_sos_live_location_url,
+    create_sos_live_location_share,
+    get_sos_public_base_url_diagnostic,
+)
+from .test_utils import isolate_register_test_database
 
 
-class SOSLiveLocationTestCase(TestCase):
+class SOSLiveLocationTestCase(TransactionTestCase):
     def setUp(self):
+        isolate_register_test_database(self)
         from django.core.cache import cache
 
         cache.clear()
@@ -43,13 +57,47 @@ class SOSLiveLocationTestCase(TestCase):
         return event, token
 
     def create_contact(self):
+        verified_at = timezone.now()
         return EmergencyContact.objects.create(
             user=self.username,
             name='Trusted Contact',
             phone_number='+1 555 555 0100',
             email='trusted@gmail.com',
             is_active=True,
+            email_consent=True,
+            sms_consent=True,
+            voice_consent=True,
+            email_verified_at=verified_at,
+            phone_verified_at=verified_at,
         )
+
+    def assert_mock_notifications_started(self, event, contact, channels=None):
+        channels = channels or (
+            SOSNotificationAttempt.CHANNEL_EMAIL,
+            SOSNotificationAttempt.CHANNEL_SMS,
+            SOSNotificationAttempt.CHANNEL_VOICE,
+        )
+        attempts = SOSNotificationAttempt.objects.filter(
+            sos_event=event,
+            emergency_contact=contact,
+        )
+        self.assertEqual(
+            set(attempts.values_list('channel', flat=True)),
+            set(channels),
+        )
+        for attempt in attempts:
+            self.assertEqual(attempt.status, SOSNotificationAttempt.STATUS_ACCEPTED)
+            self.assertTrue(attempt.provider_reference.startswith('mock-'))
+
+    def test_public_url_diagnostic_reports_missing_configuration(self):
+        with patch.dict(os.environ, {'SOS_PUBLIC_BASE_URL': ''}, clear=False):
+            diagnostic = get_sos_public_base_url_diagnostic()
+        self.assertIn('SOS_PUBLIC_BASE_URL is missing', diagnostic)
+
+    def test_public_url_diagnostic_reports_invalid_configuration(self):
+        with patch.dict(os.environ, {'SOS_PUBLIC_BASE_URL': 'http://127.0.0.1:8000'}, clear=False):
+            diagnostic = get_sos_public_base_url_diagnostic()
+        self.assertIn('valid, publicly resolvable HTTPS origin', diagnostic)
 
     def test_public_url_validation_accepts_public_https_origin(self):
         with patch.dict(os.environ, {'SOS_PUBLIC_BASE_URL': 'https://sos.example.org'}, clear=False):
@@ -91,13 +139,8 @@ class SOSLiveLocationTestCase(TestCase):
             with patch('SafetyApp.views.socket.getaddrinfo', side_effect=OSError('unavailable')):
                 self.assertEqual(build_sos_live_location_url('token'), '')
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_activation_saves_gps_and_emails_tokenized_live_link(self, mock_smtp):
+    def test_activation_saves_gps_and_starts_mock_notifications(self, mock_smtp):
         contact = self.create_contact()
         response = self.client.post('/ActivateSOS', {'latitude': '12.34', 'longitude': '56.78'})
 
@@ -107,150 +150,135 @@ class SOSLiveLocationTestCase(TestCase):
         self.assertIsNotNone(event.location_updated_at)
         share = SOSLiveLocationShare.objects.get(sos_event=event)
         self.assertTrue(share.is_valid())
-        self.assertEqual(SOSEmailDelivery.objects.get(sos_event=event, emergency_contact=contact).status, 'sent')
-
-        message = mock_smtp.return_value.__enter__.return_value.sendmail.call_args.kwargs['msg']
-        link = next(line for line in message.splitlines() if line.startswith('https://sos.example.org/'))
-        token = urlsplit(link).fragment
-        self.assertTrue(token)
-        self.assertEqual(share.token_hash, hashlib.sha256(token.encode('utf-8')).hexdigest())
-        self.assertNotIn(token, share.token_hash)
+        self.assert_mock_notifications_started(event, contact)
+        mock_smtp.assert_not_called()
 
         self.client.post('/ActivateSOS', {'latitude': '13', 'longitude': '57'})
         self.assertEqual(SOSEvent.objects.filter(user=self.username, status=SOSEvent.STATUS_ACTIVE).count(), 1)
-        mock_smtp.assert_called_once()
+        self.assertEqual(
+            SOSNotificationAttempt.objects.filter(sos_event=event).count(),
+            3,
+        )
+        mock_smtp.assert_not_called()
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': '',
-    }, clear=False)
+    @patch('SafetyApp.views.send_sos_emails_for_event')
+    @patch('SafetyApp.views.activate_sos_event_for_user', return_value=(None, None, False))
+    def test_activation_lock_failure_shows_safe_retry_message(self, mock_activate, mock_send_email):
+        response = self.client.post(
+            '/ActivateSOS',
+            {'latitude': '12.34', 'longitude': '56.78'},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'SOS could not be activated. Please retry.')
+        mock_activate.assert_called_once_with(self.username, 12.34, 56.78)
+        mock_send_email.assert_not_called()
+        self.assertFalse(SOSEvent.objects.filter(user=self.username, status=SOSEvent.STATUS_ACTIVE).exists())
+
+    def test_cancellation_allows_a_new_activation(self):
+        first, _ = self.create_active_sos()
+        self.client.post('/UpdateSOSStatus', {'status': 'CANCELLED'})
+        first.refresh_from_db()
+        self.assertEqual(first.status, SOSEvent.STATUS_CANCELLED)
+
+        second, _ = self.create_active_sos(latitude=40.7, longitude=-74)
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(SOSEvent.objects.filter(user=self.username, status=SOSEvent.STATUS_ACTIVE).count(), 1)
+
+    def test_different_users_can_activate_independently(self):
+        other_user = 'independent-sos-user'
+        first, _, created_first = activate_sos_event_for_user(self.username, 12.34, 56.78)
+        second, _, created_second = activate_sos_event_for_user(other_user, 40.7, -74.0)
+
+        self.assertTrue(created_first)
+        self.assertTrue(created_second)
+        self.assertEqual(SOSEvent.objects.filter(status=SOSEvent.STATUS_ACTIVE).count(), 2)
+        self.assertEqual(SOSEvent.objects.filter(user=self.username, status=SOSEvent.STATUS_ACTIVE).count(), 1)
+        self.assertEqual(SOSEvent.objects.filter(user=other_user, status=SOSEvent.STATUS_ACTIVE).count(), 1)
+        self.assertNotEqual(first.pk, second.pk)
+
+
+    @patch.dict(os.environ, {'SOS_PUBLIC_BASE_URL': ''}, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_activation_without_public_url_sends_initial_email_without_external_link(self, mock_smtp):
+    def test_activation_without_public_url_keeps_location_share_and_mock_dispatch(self, mock_smtp):
         contact = self.create_contact()
         self.client.post('/ActivateSOS', {'latitude': '12.34', 'longitude': '56.78'})
 
         event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
         self.assertEqual((event.latitude, event.longitude), (12.34, 56.78))
-        self.assertTrue(SOSLiveLocationShare.objects.filter(sos_event=event).exists())
-        delivery = SOSEmailDelivery.objects.get(sos_event=event, emergency_contact=contact)
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_SENT)
-        self.assertEqual(delivery.error_message, '')
-        mock_smtp.return_value.__enter__.return_value.login.assert_called_once_with('sender@example.com', 'test-password')
-        mock_smtp.return_value.__enter__.return_value.sendmail.assert_called_once()
-        message = mock_smtp.return_value.__enter__.return_value.sendmail.call_args.kwargs['msg']
-        self.assertIn('Location: 12.34, 56.78', message)
-        self.assertIn('https://www.google.com/maps?q=12.34,56.78', message)
-        self.assertIn('secure external live-location link is not configured', message)
-        self.assertNotIn('127.0.0.1', message)
-        self.assertNotIn('localhost', message)
+        self.assertTrue(event.live_location_share.is_valid())
+        self.assert_mock_notifications_started(event, contact)
+        mock_smtp.assert_not_called()
         status_page = self.client.get('/Panic')
-        self.assertContains(status_page, 'Local GPS still works here')
+        self.assertContains(status_page, 'Email alerts can still include the last saved coordinates')
         self.assertNotContains(status_page, 'Email failure details:')
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_activation_with_public_url_adds_secure_link_to_initial_email(self, mock_smtp):
+    def test_activation_with_public_url_keeps_live_location_available_without_smtp(self, mock_smtp):
         contact = self.create_contact()
         self.client.post('/ActivateSOS', {'latitude': '12.34', 'longitude': '56.78'})
 
         event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
-        delivery = SOSEmailDelivery.objects.get(sos_event=event, emergency_contact=contact)
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_SENT)
-        message = mock_smtp.return_value.__enter__.return_value.sendmail.call_args.kwargs['msg']
-        self.assertIn('Location: 12.34, 56.78', message)
-        self.assertIn('https://www.google.com/maps?q=12.34,56.78', message)
-        self.assertIn('https://sos.example.org/SOS/LiveLocation#', message)
+        self.assertTrue(event.live_location_share.is_valid())
+        self.assert_mock_notifications_started(event, contact)
+        mock_smtp.assert_not_called()
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': '',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_missing_gps_does_not_fabricate_coordinates_or_map_link(self, mock_smtp):
+    def test_missing_gps_does_not_fabricate_coordinates_and_notifications_stay_mocked(self, mock_smtp):
         contact = self.create_contact()
         self.client.post('/ActivateSOS', {'latitude': '', 'longitude': ''})
 
         event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
-        delivery = SOSEmailDelivery.objects.get(sos_event=event, emergency_contact=contact)
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_SENT)
         self.assertIsNone(event.latitude)
         self.assertIsNone(event.longitude)
-        message = mock_smtp.return_value.__enter__.return_value.sendmail.call_args.kwargs['msg']
-        self.assertIn('Location is currently unavailable.', message)
-        self.assertNotIn('Google Maps:', message)
-        self.assertNotIn('0,0', message)
+        self.assert_mock_notifications_started(event, contact)
+        mock_smtp.assert_not_called()
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_smtp_failure_is_recorded_without_resolving_sos(self, mock_smtp):
+    def test_smtp_failure_cannot_affect_mock_notification_outcomes(self, mock_smtp):
         contact = self.create_contact()
-        mock_smtp.return_value.__enter__.return_value.sendmail.side_effect = OSError('SMTP unavailable')
+        mock_smtp.side_effect = OSError('SMTP unavailable')
 
         self.client.post('/ActivateSOS', {'latitude': '12.34', 'longitude': '56.78'})
 
         event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
-        delivery = SOSEmailDelivery.objects.get(sos_event=event, emergency_contact=contact)
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_FAILED)
-        self.assertIn('Could not connect to the SMTP server', delivery.error_message)
-        self.assertNotIn('SMTP unavailable', delivery.error_message)
+        self.assert_mock_notifications_started(event, contact)
+        self.assertFalse(self.client.get('/SOS').context['delivery_summary']['can_retry'])
         self.assertTrue(event.live_location_share.is_valid())
+        mock_smtp.assert_not_called()
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL', side_effect=OSError('connection failed; credential=private'))
-    def test_smtp_connection_failure_is_reported_without_technical_details(self, mock_smtp):
+    def test_smtp_connection_failure_is_never_attempted(self, mock_smtp):
         contact = self.create_contact()
         self.client.post('/ActivateSOS', {'latitude': '12.34', 'longitude': '56.78'})
 
         event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
-        delivery = SOSEmailDelivery.objects.get(sos_event=event, emergency_contact=contact)
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_FAILED)
-        self.assertEqual(
-            delivery.error_message,
-            'Could not connect to the SMTP server. Check the network and SMTP availability.',
-        )
-        self.assertNotIn('private', delivery.error_message)
+        self.assert_mock_notifications_started(event, contact)
         self.assertTrue(event.live_location_share.is_valid())
-        mock_smtp.assert_called_once_with('smtp.gmail.com', 465)
+        mock_smtp.assert_not_called()
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_invalid_recipient_is_rejected_without_attempting_smtp(self, mock_smtp):
+    def test_invalid_email_is_excluded_while_other_mock_channels_remain_eligible(self, mock_smtp):
         contact = self.create_contact()
         EmergencyContact.objects.filter(pk=contact.pk).update(email='not-an-email-address')
 
         self.client.post('/ActivateSOS', {'latitude': '12.34', 'longitude': '56.78'})
 
         event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
-        delivery = SOSEmailDelivery.objects.get(sos_event=event, emergency_contact=contact)
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_FAILED)
-        self.assertEqual(delivery.error_message, 'This emergency contact has an invalid email address.')
+        self.assert_mock_notifications_started(
+            event,
+            contact,
+            channels=(
+                SOSNotificationAttempt.CHANNEL_SMS,
+                SOSNotificationAttempt.CHANNEL_VOICE,
+            ),
+        )
+        self.assertFalse(SOSEmailDelivery.objects.filter(sos_event=event).exists())
         mock_smtp.assert_not_called()
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_smtp_rejection_is_not_reported_as_accepted(self, mock_smtp):
+    def test_smtp_rejection_cannot_change_mock_accepted_status(self, mock_smtp):
         contact = self.create_contact()
         mock_smtp.return_value.__enter__.return_value.sendmail.return_value = {
             contact.email: (550, b'recipient rejected')
@@ -259,12 +287,39 @@ class SOSLiveLocationTestCase(TestCase):
         self.client.post('/ActivateSOS', {'latitude': '12.34', 'longitude': '56.78'})
 
         event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
-        delivery = SOSEmailDelivery.objects.get(sos_event=event, emergency_contact=contact)
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_FAILED)
-        self.assertEqual(
-            delivery.error_message,
-            'The SMTP server refused this recipient (response code 550).',
+        self.assert_mock_notifications_started(event, contact)
+        summary = self.client.get('/Panic').context['delivery_summary']
+        self.assertEqual(summary['accepted'], 3)
+        self.assertEqual(summary['delivered'], 0)
+        self.assertEqual(summary['sent'], 0)
+        mock_smtp.assert_not_called()
+
+    def test_missing_and_invalid_sessions_cannot_access_sos_workflow(self):
+        missing = Client()
+        self.assertEqual(missing.get('/Panic').status_code, 302)
+        self.assertEqual(missing.post('/ActivateSOS', {}).status_code, 302)
+        self.assertEqual(missing.post('/UpdateSOSStatus', {'status': 'CANCELLED'}).status_code, 302)
+        self.assertEqual(missing.post('/SOS/LocationUpdate', data=json.dumps({'latitude': 1, 'longitude': 2}), content_type='application/json').status_code, 401)
+        self.assertEqual(missing.get('/SOS/LocationStatus').status_code, 401)
+
+        invalid_session_values = (
+            {'username': 'no-login-flag'},
+            {'is_logged_in': True},
+            {'is_logged_in': True, 'username': ''},
+            {'is_logged_in': True, 'username': '   '},
+            {'is_logged_in': True, 'username': 123},
         )
+        for values in invalid_session_values:
+            with self.subTest(values=values):
+                client = Client()
+                session = client.session
+                for key, value in values.items():
+                    session[key] = value
+                session.save()
+                self.assertEqual(client.get('/Panic').status_code, 302)
+                self.assertEqual(client.post('/ActivateSOS', {}).status_code, 302)
+                self.assertEqual(client.post('/SOS/LocationUpdate', data=json.dumps({'latitude': 1, 'longitude': 2}), content_type='application/json').status_code, 401)
+                self.assertEqual(client.get('/SOS/LocationStatus').status_code, 401)
 
     def test_owner_location_updates_require_session_and_valid_coordinates(self):
         event, _ = self.create_active_sos()
@@ -278,6 +333,7 @@ class SOSLiveLocationTestCase(TestCase):
         another_user = Client()
         session = another_user.session
         session['username'] = 'another-user'
+        session['is_logged_in'] = True
         session.save()
         denied = another_user.post(
             '/SOS/LocationUpdate',
@@ -367,13 +423,14 @@ class SOSLiveLocationTestCase(TestCase):
 
         self.assertIn('Live location:</strong> <span id="sosLocationState">Waiting for GPS</span>', html)
         self.assertIn('id="sosLatestCoordinates">41.25, -72.5</span>', html)
-        self.assertIn('contacts cannot reach a 127.0.0.1 address', html)
+        self.assertIn('A secure public live-location link is unavailable', html)
 
     def test_location_status_rejects_another_users_session(self):
         self.create_active_sos(latitude=1, longitude=2, updated_at=timezone.now())
         another_user = Client()
         session = another_user.session
         session['username'] = 'another-user'
+        session['is_logged_in'] = True
         session.save()
 
         response = another_user.get('/SOS/LocationStatus')
@@ -400,13 +457,8 @@ class SOSLiveLocationTestCase(TestCase):
         self.assertEqual(update.status_code, 409)
         self.assertEqual(recipient.status_code, 410)
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_explicit_retry_sends_failed_delivery_once(self, mock_smtp):
+    def test_legacy_retry_route_uses_mock_workflow_without_resending_legacy_email(self, mock_smtp):
         contact = self.create_contact()
         event, old_token = self.create_active_sos()
         delivery = SOSEmailDelivery.objects.create(
@@ -420,36 +472,22 @@ class SOSLiveLocationTestCase(TestCase):
 
         self.assertEqual(first_response.status_code, 302)
         delivery.refresh_from_db()
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_SENT)
-        self.assertEqual(mock_smtp.return_value.__enter__.return_value.sendmail.call_count, 1)
-        message = mock_smtp.return_value.__enter__.return_value.sendmail.call_args.kwargs['msg']
-        link = next(line for line in message.splitlines() if line.startswith('https://sos.example.org/'))
-        retried_token = urlsplit(link).fragment
-        self.assertTrue(retried_token)
-        self.assertNotEqual(retried_token, old_token)
+        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_FAILED)
+        self.assert_mock_notifications_started(event, contact)
+        self.assertEqual(SOSEmailDelivery.objects.filter(sos_event=event).count(), 1)
         recipient_response = self.client.post(
-            '/SOS/LiveLocation/Data',
-            data=json.dumps({'token': retried_token}),
-            content_type='application/json',
-        )
-        self.assertEqual(recipient_response.status_code, 200)
-        old_recipient_access = self.client.post(
             '/SOS/LiveLocation/Data',
             data=json.dumps({'token': old_token}),
             content_type='application/json',
         )
-        self.assertEqual(old_recipient_access.status_code, 404)
+        self.assertEqual(recipient_response.status_code, 200)
 
         self.client.post('/SOS/RetryEmail')
-        self.assertEqual(mock_smtp.return_value.__enter__.return_value.sendmail.call_count, 1)
+        self.assertEqual(SOSNotificationAttempt.objects.filter(sos_event=event).count(), 3)
+        mock_smtp.assert_not_called()
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_ambiguous_smtp_failure_is_not_safe_to_retry(self, mock_smtp):
+    def test_legacy_ambiguous_email_record_is_not_resent_by_retry_route(self, mock_smtp):
         contact = self.create_contact()
         event, _ = self.create_active_sos()
         delivery = SOSEmailDelivery.objects.create(
@@ -463,15 +501,12 @@ class SOSLiveLocationTestCase(TestCase):
 
         delivery.refresh_from_db()
         self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_FAILED)
+        self.assert_mock_notifications_started(event, contact)
         mock_smtp.assert_not_called()
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': '',
-    }, clear=False)
+    @patch.dict(os.environ, {'SOS_PUBLIC_BASE_URL': ''}, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_retry_without_public_https_origin_sends_email_without_live_link(self, mock_smtp):
+    def test_legacy_retry_does_not_depend_on_public_url_or_send_smtp(self, mock_smtp):
         contact = self.create_contact()
         event, _ = self.create_active_sos()
         delivery = SOSEmailDelivery.objects.create(
@@ -485,13 +520,9 @@ class SOSLiveLocationTestCase(TestCase):
 
         delivery.refresh_from_db()
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_SENT)
-        self.assertEqual(delivery.error_message, '')
-        mock_smtp.return_value.__enter__.return_value.sendmail.assert_called_once()
-        message = mock_smtp.return_value.__enter__.return_value.sendmail.call_args.kwargs['msg']
-        self.assertNotIn('https://sos.example.org/SOS/LiveLocation#', message)
-        self.assertNotIn('127.0.0.1', message)
-        self.assertNotIn('localhost', message)
+        self.assertEqual(delivery.status, SOSEmailDelivery.STATUS_FAILED)
+        self.assert_mock_notifications_started(event, contact)
+        mock_smtp.assert_not_called()
 
     def test_recipient_can_read_latest_location_and_staleness(self):
         event, token = self.create_active_sos(
@@ -524,11 +555,14 @@ class SOSLiveLocationTestCase(TestCase):
             longitude=20,
             updated_at=timezone.now(),
         )
-        second_event, second_token = self.create_active_sos(
+        second_event = SOSEvent.objects.create(
+            user='other-share-user',
             latitude=30,
             longitude=40,
-            updated_at=timezone.now(),
+            location_updated_at=timezone.now(),
+            status=SOSEvent.STATUS_ACTIVE,
         )
+        second_token = create_sos_live_location_share(second_event)
 
         first_response = self.client.post(
             '/SOS/LiveLocation/Data',
@@ -588,15 +622,10 @@ class SOSLiveLocationTestCase(TestCase):
         self.assertEqual(revoked.status_code, 410)
         self.assertTrue(revoked['Cache-Control'].startswith('no-store'))
 
-    @patch.dict(os.environ, {
-        'PANIC_EMAIL_USER': 'sender@example.com',
-        'PANIC_EMAIL_PASS': 'test-password',
-        'SOS_PUBLIC_BASE_URL': 'https://sos.example.org',
-    }, clear=False)
     @patch('SafetyApp.views.smtplib.SMTP_SSL')
-    def test_expired_safety_timer_uses_the_same_sos_share_workflow(self, mock_smtp):
-        self.create_contact()
-        SafetyTimer.objects.create(
+    def test_expired_safety_timer_page_does_not_trigger_automatic_sos(self, mock_smtp):
+        contact = self.create_contact()
+        timer = SafetyTimer.objects.create(
             user=self.username,
             duration=15,
             started_at=timezone.now() - timedelta(minutes=20),
@@ -605,9 +634,37 @@ class SOSLiveLocationTestCase(TestCase):
         )
 
         response = self.client.get('/SafetyTimer')
-        event = SOSEvent.objects.get(user=self.username, status=SOSEvent.STATUS_ACTIVE)
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(event.live_location_share.is_valid())
-        self.assertContains(response, 'Live location:')
-        message = mock_smtp.return_value.__enter__.return_value.sendmail.call_args.kwargs['msg']
-        self.assertIn('https://sos.example.org/SOS/LiveLocation#', message)
+        timer.refresh_from_db()
+        self.assertEqual(timer.status, SafetyTimer.STATUS_EXPIRED)
+        self.assertFalse(
+            SOSEvent.objects.filter(
+                user=self.username,
+                status=SOSEvent.STATUS_ACTIVE,
+            ).exists()
+        )
+        self.assertFalse(SOSLiveLocationShare.objects.exists())
+        self.assertFalse(SOSNotificationAttempt.objects.exists())
+        mock_smtp.assert_not_called()
+
+
+class SOSConcurrentActivationTestCase(TransactionTestCase):
+    reset_sequences = True
+
+    def test_simultaneous_activation_creates_one_active_event(self):
+        worker_count = 6
+        barrier = Barrier(worker_count)
+
+        def activate():
+            barrier.wait(timeout=5)
+            _, _, created = activate_sos_event_for_user('concurrent-user', 12.34, 56.78)
+            return created
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            results = list(executor.map(lambda _: activate(), range(worker_count)))
+
+        self.assertEqual(sum(results), 1)
+        self.assertEqual(
+            SOSEvent.objects.filter(user='concurrent-user', status=SOSEvent.STATUS_ACTIVE).count(),
+            1,
+        )

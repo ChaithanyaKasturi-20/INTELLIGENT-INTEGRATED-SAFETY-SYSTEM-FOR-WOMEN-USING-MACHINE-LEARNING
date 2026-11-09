@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}My Account | Personal Safety Profile{% endblock %}
+{% block page_head %}
+<style>
+.profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.profile-card{background:rgba(255,255,255,.94);border:1px solid rgba(35,70,90,.12);border-radius:16px;padding:20px}
+.profile-card.full{grid-column:1/-1}
+.profile-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.profile-field{display:flex;flex-direction:column;gap:6px}
+.profile-field.full{grid-column:1/-1}
+.profile-field label{font-weight:700;color:#243b4a}
+.profile-field input,.profile-field select,.profile-field textarea{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #b9c7ce}
+.profile-field textarea{min-height:90px;resize:vertical}
+.profile-error{color:#a12b2b}.profile-actions{display:flex;gap:10px;flex-wrap:wrap}
+.profile-consent{display:flex;gap:9px;align-items:flex-start}.profile-consent input{width:auto}
+.profile-contact-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.profile-contact{border:1px solid #d8e1e5;border-radius:12px;padding:14px}.profile-contact-badge{display:inline-block;margin-right:6px;padding:3px 8px;border-radius:999px;background:#dff3e7;color:#21653a;font-size:.78rem}
+@media(max-width:720px){.profile-grid,.profile-form-grid{grid-template-columns:1fr}.profile-card.full,.profile-field.full{grid-column:1}}
+</style>
+{% endblock %}
+{% block body_class %}account-profile-page{% endblock %}
+{% block content %}
+<section class="profile-grid" aria-label="Personal safety profile">
+  <div class="profile-card full">
+    <p class="home-eyebrow">Private profile</p>
+    <h2>My Account</h2>
+    <p>Keep personal, medical and emergency responder information available only in your private account.</p>
+    {% for message in messages %}
+      <p class="auth-feedback {{ message.tags }}" role="status">{{ message }}</p>
+    {% endfor %}
+    {% if form_errors %}
+      <div class="profile-error" role="alert">
+        {% for field, errors in form_errors.items %}<p><strong>{{ field }}:</strong> {{ errors|join:", " }}</p>{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  <form method="post" class="profile-card full" action="{% url 'MyAccount' %}">
+    {% csrf_token %}
+    <div class="profile-grid">
+      <section class="profile-card">
+        <h3>Personal Profile</h3>
+        <div class="profile-form-grid">
+          <div class="profile-field full"><label for="full_name">Full name</label><input id="full_name" name="full_name" maxlength="150" value="{{ profile.full_name }}" autocomplete="name"></div>
+          <div class="profile-field"><label for="date_of_birth">Date of birth</label><input id="date_of_birth" name="date_of_birth" type="date" value="{{ profile.date_of_birth|date:'Y-m-d' }}"></div>
+          <div class="profile-field"><label>Age</label><input value="{% if profile.age != None %}{{ profile.age }} years{% else %}Not provided{% endif %}" disabled></div>
+          <div class="profile-field"><label for="gender">Gender (optional)</label><select id="gender" name="gender">{% for value,label in gender_choices %}<option value="{{ value }}" {% if profile.gender == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+          <div class="profile-field"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" value="{{ account.email }}" autocomplete="email" required></div>
+          <div class="profile-field"><label for="mobile_number">Mobile number</label><input id="mobile_number" name="mobile_number" type="tel" maxlength="20" value="{{ account.mobile_number }}" autocomplete="tel" required></div>
+          <div class="profile-field full"><label for="address">Address (optional)</label><textarea id="address" name="address" maxlength="500" autocomplete="street-address">{{ account.address }}</textarea></div>
+        </div>
+      </section>
+
+      <section class="profile-card">
+        <h3>Medical Information</h3>
+        <p>Optional. Do not include this information in community reports or SOS emails.</p>
+        <div class="profile-consent"><input id="medical_consent" name="medical_consent" type="checkbox" {% if profile.medical_consent %}checked{% endif %}><label for="medical_consent">I explicitly consent to storing this medical information in my private profile.</label></div>
+        <div class="profile-form-grid">
+          <div class="profile-field"><label for="blood_group">Blood group</label><select id="blood_group" name="blood_group">{% for value,label in blood_group_choices %}<option value="{{ value }}" {% if profile.blood_group == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+          <div class="profile-field"><label for="medical_conditions">Existing conditions</label><textarea id="medical_conditions" name="medical_conditions">{{ profile.medical_conditions }}</textarea></div>
+          <div class="profile-field"><label for="allergies">Allergies</label><textarea id="allergies" name="allergies">{{ profile.allergies }}</textarea></div>
+          <div class="profile-field"><label for="medications">Current medications</label><textarea id="medications" name="medications">{{ profile.medications }}</textarea></div>
+          <div class="profile-field full"><label for="medical_notes">Important medical notes</label><textarea id="medical_notes" name="medical_notes">{{ profile.medical_notes }}</textarea></div>
+          <div class="profile-field full"><label for="disability_information">Disability or other emergency-relevant information</label><textarea id="disability_information" name="disability_information">{{ profile.disability_information }}</textarea></div>
+        </div>
+      </section>
+
+      <section class="profile-card full">
+        <h3>Emergency Safety Information</h3>
+        <div class="profile-form-grid">
+          <div class="profile-field full"><label for="emergency_instructions">Important emergency instructions</label><textarea id="emergency_instructions" name="emergency_instructions">{{ profile.emergency_instructions }}</textarea></div>
+          <div class="profile-field full"><label for="safety_notes">Relevant safety notes</label><textarea id="safety_notes" name="safety_notes">{{ profile.safety_notes }}</textarea></div>
+          <div class="profile-field full"><label for="additional_emergency_information">Additional responder information</label><textarea id="additional_emergency_information" name="additional_emergency_information">{{ profile.additional_emergency_information }}</textarea></div>
+        </div>
+      </section>
+    </div>
+    <div class="profile-actions" style="margin-top:16px"><button type="submit">Save Changes</button><a class="dashboard-action" href="{% url 'MyAccount' %}">Cancel</a></div>
+  </form>
+
+  <section class="profile-card full" aria-labelledby="contacts-title">
+    <h3 id="contacts-title">Emergency Contacts</h3>
+    <p><a class="dashboard-action dashboard-action-primary" href="{% url 'EmergencyContacts' %}">Add or Manage Contacts</a></p>
+    <div class="profile-contact-list">
+      {% for contact in contacts %}
+        <article class="profile-contact">
+          <h4>{{ contact.name }}</h4>
+          {% if contact.is_primary %}<span class="profile-contact-badge">Primary</span>{% endif %}
+          <p>{{ contact.relationship|default:'Relationship not specified' }}</p>
+          <p><strong>Phone:</strong> {{ contact.phone_number }}</p>
+          {% if contact.alternative_phone_number %}<p><strong>Alternative:</strong> {{ contact.alternative_phone_number }}</p>{% endif %}
+        </article>
+      {% empty %}
+        <p>No emergency contacts added yet.</p>
+      {% endfor %}
+    </div>
+  </section>
+</section>
+{% endblock %}

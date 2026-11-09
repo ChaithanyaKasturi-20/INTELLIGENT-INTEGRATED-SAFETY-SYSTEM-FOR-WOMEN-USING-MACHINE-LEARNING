@@ -1,29 +1,27 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="referrer" content="no-referrer" />
-  <title>Shared SOS Live Location</title>
+{% block title %}Shared SOS Live Location{% endblock %}
+{% block page_head %}
+<meta name="referrer" content="no-referrer" />
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    body { margin: 0; padding: 20px; color: #222; background: #f8f3f3; font: 16px/1.5 Arial, sans-serif; }
-    main { max-width: 900px; margin: 0 auto; padding: 20px; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(60,0,5,.12); }
+    .location-card { max-width: 900px; margin: 0 auto; padding: 20px; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(60,0,5,.12); }
     h1 { color: #8c0209; font-size: 1.5rem; }
     #shareStatus { padding: 12px; border-radius: 6px; background: #fff7df; }
     #shareMap { width: 100%; height: min(65vh, 520px); min-height: 280px; border-radius: 8px; background: #eee; }
-    @media (max-width: 480px) { body { padding: 10px; } main { padding: 14px; } #shareMap { min-height: 320px; } }
+    @media (max-width: 480px) { .location-card { padding: 14px; } #shareMap { min-height: 320px; } }
   </style>
-</head>
-<body>
-  <main>
+{% endblock %}
+{% block body_class %}{% endblock %}
+{% block content %}
+<div class="location-card">
     <h1>SOS live location</h1>
     <p id="shareStatus" role="status" aria-live="polite">Checking this secure sharing link…</p>
     <p>Last location update: <time id="shareUpdatedAt">Not available</time></p>
     <div id="shareMap" aria-label="Map showing the latest location shared during an active SOS"></div>
     <p>This private link expires after 24 hours and stops working when the SOS is resolved. Updates depend on the user’s browser and device staying online with location access enabled.</p>
-  </main>
+  </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     (function () {
@@ -103,5 +101,4 @@
       });
     })();
   </script>
-</body>
-</html>
+{% endblock %}

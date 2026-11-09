@@ -1,12 +1,7 @@
+{% extends "base.html" %}
 {% load static %}
-<html>
-<head>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</title>
-<meta name="keywords" content="" />
-<meta name="Premium Series" content="" />
-<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+{% block title %}INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING{% endblock %}
+{% block page_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script language="javascript">
@@ -26,9 +21,6 @@
 	}
 </script>
 <style>
-body {
-  background-image: url("{% static 'images/back.jpg' %}");
-}
 .route-panel {
   max-width: 900px;
   margin: 0 auto;
@@ -168,6 +160,25 @@ body {
   border: 1px solid #e7dcdc;
   border-radius: 8px;
 }
+.nearby-facilities-note {
+  margin: 10px 0 0;
+  color: #555;
+  font-size: 13px;
+}
+.nearby-retry-button[hidden] {
+  display: none;
+}
+.route-panel button.nearby-retry-button {
+  min-height: 42px;
+  margin: 4px 0 10px;
+  padding: 8px 14px;
+  background: #4c4c4c;
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+}
 .safety-legend-item {
   display: inline-flex;
   align-items: center;
@@ -249,32 +260,12 @@ body {
   }
 }
 </style>
-</head>
-<body>
-<!-- start header -->
-<div id="header">
-	<div id="logo">
-		<h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font>
-
-</center></span></h1>
-	</div>
-	<div id="menu">
-		<ul>
-     <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
-	 <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
-	 <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
-	 <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
-	 <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
-<li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
-   </ul>
-	</div>
-</div>
-
+{% endblock %}
+{% block body_class %}{% endblock %}
+{% block content %}
 <div id="wrapper">
 	<div id="page">
 		<div id="content">
-		<div class="flower"><img src="{% static 'images/tra.jpg' %}" alt="" width="800" height="200" /></center></div>
-			<br/><br/>
 			<div class="flower"><center><h1>
 			<font size="" align="center">Safe Places</font><h1></div>
 
@@ -337,6 +328,32 @@ body {
 						<button type="button" id="startJourneyButton" class="success">START NAVIGATION</button>
 						<button type="button" id="endJourneyButton" class="secondary">END NAVIGATION</button>
 					</div>
+          <details class="route-section" style="margin-top:12px;">
+            <summary>Journey check-in and sharing preferences</summary>
+            <p>These preferences are saved with the journey. Automatic SOS is off unless you explicitly select it.</p>
+            <label>Check in every
+              <select id="journeyCheckinInterval">
+                <option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option>
+              </select>
+            </label>
+            <label>Grace period
+              <select id="journeyGracePeriod">
+                <option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option>
+              </select>
+            </label>
+            {% if journey_contacts %}
+              <p><label><input id="journeyGuardianEnabled" type="checkbox" /> Notify selected contacts if a check-in remains unconfirmed after grace</label></p>
+              <div id="journeyContactChoices">
+                {% for contact in journey_contacts %}
+                  <label style="display:block;"><input type="checkbox" name="journey_guardian_contact_ids" value="{{ contact.pk }}" /> {{ contact.name }} ({{ contact.email }})</label>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p>No emergency contacts currently have both verified email addresses and recorded email consent.</p>
+            {% endif %}
+            <p><label><input id="journeyAutoSos" type="checkbox" /> If still unconfirmed 15 minutes after grace, use the existing SOS workflow</label></p>
+            <p><label><input id="journeyLocationConsent" type="checkbox" /> Share foreground GPS coordinates, accuracy, and timestamp with selected contacts</label></p>
+          </details>
           <div id="routeOptions" class="route-options"></div>
           <div id="navigationInstruction" class="navigation-instruction">
             <strong id="navigationInstructionText">Continue straight</strong>
@@ -348,6 +365,8 @@ body {
 				<div class="route-section">
 					<div class="route-section-title">Map</div>
 					<div id="routeStatusMessage" class="route-status inactive">Detecting your current location...</div>
+          <div id="nearbyFacilitiesStatus" class="route-status inactive" role="status" aria-live="polite">Nearby facilities will load after a route search.</div>
+          <button type="button" id="retryNearbyFacilitiesButton" class="nearby-retry-button" hidden>Retry nearby facilities search</button>
 					<div class="safety-legend" aria-label="Nearby safety place legend">
             <label class="safety-legend-item"><input type="checkbox" data-safety-category="police" checked /> 👮 Police</label>
             <label class="safety-legend-item"><input type="checkbox" data-safety-category="hospital" checked /> 🏥 Hospitals</label>
@@ -355,6 +374,7 @@ body {
             <label class="safety-legend-item"><input type="checkbox" data-safety-category="fire_station" checked /> 🚒 Fire Stations</label>
             <label class="safety-legend-item"><input type="checkbox" data-safety-category="clinic" checked /> ⚕️ Clinics</label>
 					</div>
+          <p class="nearby-facilities-note">Facility markers are based on OpenStreetMap data. Distances, when shown, are approximate straight-line estimates; directions use the available road-routing service.</p>
           <div class="map-control-row">
             <button type="button" id="recenterMapButton" class="secondary">Recenter</button>
           </div>
@@ -406,6 +426,8 @@ body {
   const routeMap = document.getElementById('routeMap');
   const locationStatusText = document.getElementById('locationStatusText');
   const routeStatusMessage = document.getElementById('routeStatusMessage');
+  const nearbyFacilitiesStatus = document.getElementById('nearbyFacilitiesStatus');
+  const retryNearbyFacilitiesButton = document.getElementById('retryNearbyFacilitiesButton');
   const routeSummaryCard = document.getElementById('routeSummaryCard');
   const routeFromValue = document.getElementById('routeFromValue');
   const routeToValue = document.getElementById('routeToValue');
@@ -421,6 +443,16 @@ body {
   const navigationRemainingDuration = document.getElementById('navigationRemainingDuration');
   const navigationEta = document.getElementById('navigationEta');
   const recenterMapButton = document.getElementById('recenterMapButton');
+  const journeyCheckinInterval = document.getElementById('journeyCheckinInterval');
+  const journeyGracePeriod = document.getElementById('journeyGracePeriod');
+  const journeyGuardianEnabled = document.getElementById('journeyGuardianEnabled');
+  const journeyAutoSos = document.getElementById('journeyAutoSos');
+  const journeyLocationConsent = document.getElementById('journeyLocationConsent');
+  const resumeJourneyId = {{ resume_journey.pk|default:"null" }};
+  const journeyCreateUrl = "{% url 'JourneyCreate' %}";
+  const journeyStartUrlTemplate = "{% url 'JourneyStart' 0 %}";
+  let journeyStartPending = false;
+  let pendingJourneyId = null;
 
   let watchId = null;
   let lastPosition = null;
@@ -434,8 +466,12 @@ body {
   let destinationLatLng = null;
   let destinationLabel = '';
   let routeData = null;
+  let routeCalculatedAt = 0;
   let selectedRouteIndex = 0;
   let currentPosition = null;
+  let nearbyFacilitiesLoading = false;
+  let nearbySearchOrigin = null;
+  let nearbySearchRequest = 0;
   let activeStepIndex = 0;
   let lastSpokenInstruction = '';
   let lastRerouteAt = 0;
@@ -461,6 +497,18 @@ body {
     routeStatusMessage.textContent = message;
     routeStatusMessage.classList.remove('active', 'inactive');
     routeStatusMessage.classList.add(isActive ? 'active' : 'inactive');
+  }
+
+  function setNearbyFacilitiesStatus(message, showRetry) {
+    if (nearbyFacilitiesStatus) {
+      nearbyFacilitiesStatus.textContent = message;
+      nearbyFacilitiesStatus.classList.remove('active', 'inactive');
+      nearbyFacilitiesStatus.classList.add('inactive');
+    }
+    if (retryNearbyFacilitiesButton) {
+      retryNearbyFacilitiesButton.hidden = !showRetry;
+      retryNearbyFacilitiesButton.disabled = !showRetry || nearbyFacilitiesLoading;
+    }
   }
 
   function showStatus(message, isActive) {
@@ -529,6 +577,92 @@ body {
   function getSelectedRoute() {
     if (!routeData || !routeData.routes || !routeData.routes.length) return null;
     return routeData.routes[Math.min(selectedRouteIndex, routeData.routes.length - 1)];
+  }
+
+  function toLocalDateTimeValue(date) {
+    function twoDigits(value) { return String(value).padStart(2, '0'); }
+    return date.getFullYear() + '-' + twoDigits(date.getMonth() + 1) + '-' +
+      twoDigits(date.getDate()) + 'T' + twoDigits(date.getHours()) + ':' +
+      twoDigits(date.getMinutes());
+  }
+
+  async function persistAndStartJourney() {
+    if (journeyStartPending) return false;
+    journeyStartPending = true;
+    const csrfInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+    const csrfToken = csrfInput ? csrfInput.value : '';
+    const route = getSelectedRoute();
+    if (!csrfToken || !route || !destinationLatLng || !currentPosition ||
+        Date.now() - currentPosition.updatedAt > 120000 ||
+        Date.now() - routeCalculatedAt > 120000) {
+      journeyStartPending = false;
+      throw new Error('Refresh your current location and route before starting this saved journey.');
+    }
+
+    let journeyId = resumeJourneyId || pendingJourneyId;
+    if (!journeyId) {
+      const selectedContacts = document.querySelectorAll('input[name="journey_guardian_contact_ids"]:checked');
+      if (journeyGuardianEnabled && journeyGuardianEnabled.checked && !selectedContacts.length) {
+        journeyStartPending = false;
+        throw new Error('Select at least one verified, consented contact or turn off Guardian notifications.');
+      }
+      const departure = new Date();
+      const arrival = new Date(departure.getTime() + (Number(route.duration) || 0) * 1000);
+      const body = new URLSearchParams();
+      body.append('origin_label', 'Current location');
+      body.append('destination_label', destinationLabel || destinationField.value.trim());
+      body.append('origin_latitude', String(currentPosition.latitude));
+      body.append('origin_longitude', String(currentPosition.longitude));
+      body.append('destination_latitude', String(destinationLatLng.lat));
+      body.append('destination_longitude', String(destinationLatLng.lon));
+      body.append('distance_meters', String(Math.round(Number(route.distance) || 0)));
+      body.append('duration_seconds', String(Math.round(Number(route.duration) || 0)));
+      body.append('planned_departure', toLocalDateTimeValue(departure));
+      body.append('expected_arrival', toLocalDateTimeValue(arrival));
+      body.append('timezone_offset_minutes', String(departure.getTimezoneOffset()));
+      body.append('checkin_interval_minutes', journeyCheckinInterval ? journeyCheckinInterval.value : '15');
+      body.append('grace_period_minutes', journeyGracePeriod ? journeyGracePeriod.value : '15');
+      body.append('guardian_enabled', journeyGuardianEnabled && journeyGuardianEnabled.checked ? 'true' : 'false');
+      body.append('auto_sos_on_unconfirmed', journeyAutoSos && journeyAutoSos.checked ? 'true' : 'false');
+      body.append('share_location_with_contacts', journeyLocationConsent && journeyLocationConsent.checked ? 'true' : 'false');
+      if (journeyGuardianEnabled && journeyGuardianEnabled.checked) {
+        selectedContacts.forEach(function(input) {
+          body.append('guardian_contact_ids', input.value);
+        });
+      }
+
+      const createResponse = await fetch(journeyCreateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          'X-CSRFToken': csrfToken
+        },
+        body: body.toString(),
+        credentials: 'same-origin'
+      });
+      const created = await createResponse.json();
+      if (!createResponse.ok) {
+        journeyStartPending = false;
+        throw new Error(created.error || 'The journey plan could not be saved.');
+      }
+      journeyId = created.id;
+      pendingJourneyId = journeyId;
+    }
+
+    const startUrl = journeyStartUrlTemplate.replace(/\/0\/Start$/, '/' + journeyId + '/Start');
+    const startResponse = await fetch(startUrl, {
+      method: 'POST',
+      headers: {'X-CSRFToken': csrfToken},
+      credentials: 'same-origin'
+    });
+    const started = await startResponse.json();
+    journeyStartPending = false;
+    if (!startResponse.ok) {
+      throw new Error(started.error || 'The saved journey could not be started.');
+    }
+    pendingJourneyId = null;
+    showStatus('Journey check-ins are scheduled. This page must remain open for route navigation.', true);
+    return true;
   }
 
   function getRouteSteps() {
@@ -652,7 +786,9 @@ body {
     originLng.value = position.coords.longitude;
     currentPosition = {
       latitude: position.coords.latitude,
-      longitude: position.coords.longitude
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      updatedAt: Date.now()
     };
     if (currentMarker && map) {
       currentMarker.setLatLng([position.coords.latitude, position.coords.longitude]);
@@ -743,45 +879,68 @@ body {
   function queryNearbyPlaces(lat, lng) {
     if (!map) return;
 
-    const radiusMeters = 5000;
-    const overpassQuery = encodeURIComponent(`
-      [out:json][timeout:25];
-      (
-        node["amenity"="police"](around:${radiusMeters},${lat},${lng});
-        way["amenity"="police"](around:${radiusMeters},${lat},${lng});
-        relation["amenity"="police"](around:${radiusMeters},${lat},${lng});
+    const originLatitude = Number(lat);
+    const originLongitude = Number(lng);
+    if (!Number.isFinite(originLatitude) || !Number.isFinite(originLongitude) ||
+        originLatitude < -90 || originLatitude > 90 ||
+        originLongitude < -180 || originLongitude > 180) {
+      setNearbyFacilitiesStatus('Current location is unavailable, so nearby facilities cannot be searched yet.', false);
+      return;
+    }
 
-        node["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
-        way["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
-        relation["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
+    nearbySearchOrigin = { lat: originLatitude, lng: originLongitude };
+    const requestId = ++nearbySearchRequest;
+    const primaryRadiusMeters = 5000;
+    const fallbackRadiusMeters = 1000;
+    let searchedRadiusMeters = primaryRadiusMeters;
+    let timedOut = false;
+    const abortController = new AbortController();
+    const timeoutId = window.setTimeout(function() {
+      timedOut = true;
+      abortController.abort();
+    }, 30000);
 
-        node["amenity"="pharmacy"](around:${radiusMeters},${lat},${lng});
-        way["amenity"="pharmacy"](around:${radiusMeters},${lat},${lng});
-        relation["amenity"="pharmacy"](around:${radiusMeters},${lat},${lng});
+    function fetchNearbyPlaces(radiusMeters) {
+      const overpassQuery = encodeURIComponent(`
+        [out:json][timeout:25];
+        (
+          nwr["amenity"~"^(police|hospital|pharmacy|fire_station|clinic)$"](around:${radiusMeters},${lat},${lng});
+          nwr["healthcare"="clinic"](around:${radiusMeters},${lat},${lng});
+        );
+        out center;
+      `);
 
-        node["amenity"="fire_station"](around:${radiusMeters},${lat},${lng});
-        way["amenity"="fire_station"](around:${radiusMeters},${lat},${lng});
-        relation["amenity"="fire_station"](around:${radiusMeters},${lat},${lng});
-
-        node["amenity"="clinic"](around:${radiusMeters},${lat},${lng});
-        way["amenity"="clinic"](around:${radiusMeters},${lat},${lng});
-        relation["amenity"="clinic"](around:${radiusMeters},${lat},${lng});
-
-        node["healthcare"="clinic"](around:${radiusMeters},${lat},${lng});
-        way["healthcare"="clinic"](around:${radiusMeters},${lat},${lng});
-        relation["healthcare"="clinic"](around:${radiusMeters},${lat},${lng});
-      );
-      out center;
-    `);
-
-    fetch('https://overpass-api.de/api/interpreter?data=' + overpassQuery)
-      .then(function(response) {
-        if (!response.ok) {
-          throw new Error('Nearby places unavailable');
-        }
-        return response.json();
+      return fetch('https://overpass-api.de/api/interpreter?data=' + overpassQuery, {
+        signal: abortController.signal,
+        headers: { 'Accept': 'application/json' }
       })
+        .then(function(response) {
+          if (!response.ok) {
+            if (response.status === 504 && radiusMeters === primaryRadiusMeters) {
+              searchedRadiusMeters = fallbackRadiusMeters;
+              return fetchNearbyPlaces(fallbackRadiusMeters);
+            }
+            throw new Error(response.status === 504 ? 'timeout' : 'unavailable');
+          }
+          return response.json();
+        });
+    }
+
+    nearbyFacilitiesLoading = true;
+    setNearbyFacilitiesStatus('Searching OpenStreetMap for nearby safety facilities…', false);
+    if (retryNearbyFacilitiesButton) retryNearbyFacilitiesButton.disabled = true;
+    Object.keys(nearbyCategoryLayers).forEach(function(category) {
+      if (map.hasLayer(nearbyCategoryLayers[category])) {
+        map.removeLayer(nearbyCategoryLayers[category]);
+      }
+    });
+    nearbyCategoryLayers = {};
+
+    fetchNearbyPlaces(primaryRadiusMeters)
       .then(function(data) {
+        if (requestId !== nearbySearchRequest) return;
+        if (data && data.remark) throw new Error('unavailable');
+
         const elementCounts = { node: 0, way: 0, relation: 0 };
         const categoryCounts = { police: 0, hospital: 0, pharmacy: 0, fire_station: 0, clinic: 0, unclassified: 0 };
         const tagSamples = [];
@@ -804,7 +963,12 @@ body {
           console.log('unclassified:', 0);
           console.log('sample tags:', tagSamples);
           console.groupEnd();
-          routeStatusForMessage('No nearby support locations found in OpenStreetMap.', false);
+          setNearbyFacilitiesStatus(
+            searchedRadiusMeters === fallbackRadiusMeters
+              ? 'No mapped safety facilities were found within 1 km after the 5 km search timed out. You can retry.'
+              : 'No mapped safety facilities were found within 5 km. You can retry.',
+            true
+          );
           return;
         }
 
@@ -831,14 +995,24 @@ body {
             return;
           }
 
-          categoryCounts[category] += 1;
-
-          const latValue = Number(entry.lat || (entry.center && entry.center.lat));
-          const lonValue = Number(entry.lon || (entry.center && entry.center.lon));
-          if (!Number.isFinite(latValue) || !Number.isFinite(lonValue)) {
+          const rawLatitude = typeof entry.lat !== 'undefined' && entry.lat !== null
+            ? entry.lat
+            : entry.center && entry.center.lat;
+          const rawLongitude = typeof entry.lon !== 'undefined' && entry.lon !== null
+            ? entry.lon
+            : entry.center && entry.center.lon;
+          if (rawLatitude === null || typeof rawLatitude === 'undefined' || rawLatitude === '' ||
+              rawLongitude === null || typeof rawLongitude === 'undefined' || rawLongitude === '') {
+            return;
+          }
+          const latValue = Number(rawLatitude);
+          const lonValue = Number(rawLongitude);
+          if (!Number.isFinite(latValue) || !Number.isFinite(lonValue) ||
+              latValue < -90 || latValue > 90 || lonValue < -180 || lonValue > 180) {
             return;
           }
 
+          categoryCounts[category] += 1;
           safetyGroups[category].push({
             lat: latValue,
             lon: lonValue,
@@ -910,47 +1084,117 @@ body {
           };
 
           items.forEach(function(item) {
+            const facilityTitle = item.name || 'Unnamed ' + (labelMap[item.category] || 'support location');
             const marker = L.marker([item.lat, item.lon], {
+              title: facilityTitle + ' — ' + labelMap[item.category],
+              alt: facilityTitle + ' — ' + labelMap[item.category],
               icon: L.divIcon({
                 className: 'safety-marker-icon',
-                html: '<div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#fff;border:2px solid #8C0209;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-size:16px;line-height:1;">' + (iconMap[item.category] || '📍') + '</div>',
+                html: '<div role="img" aria-label="' + labelMap[item.category] + '" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#fff;border:3px solid ' + ({
+                  police: '#8c0209',
+                  hospital: '#176b87',
+                  pharmacy: '#4e762b',
+                  fire_station: '#ad5100',
+                  clinic: '#634987'
+                }[item.category] || '#8C0209') + ';box-shadow:0 2px 8px rgba(0,0,0,0.2);font-size:16px;line-height:1;">' + (iconMap[item.category] || '📍') + '</div>',
                 iconSize: [28, 28],
                 iconAnchor: [14, 14],
                 popupAnchor: [0, -10]
               })
             });
 
-            const title = item.name || 'Unnamed ' + (labelMap[item.category] || 'support location');
-            const addressText = item.address && item.address !== 'Address not available' ? '<br>Address: ' + item.address : '';
-            const directionsButtonId = 'nearbyDirections-' + totalMarkers;
-            marker.bindPopup('<strong>' + title + '</strong><br>' + (labelMap[item.category] || 'Support Location') + addressText + '<br><button type="button" id="' + directionsButtonId + '" class="route-button" style="margin-top:8px;">DIRECTIONS</button>');
-            marker.on('popupopen', function() {
-              const button = document.getElementById(directionsButtonId);
-              if (button) {
-                button.addEventListener('click', function() {
-                  destinationLabel = title;
-                  destinationField.value = title;
-                  calculateRouteFromCoordinates(item.lat, item.lon, title);
-                  marker.closePopup();
-                });
-              }
-            });
+            const popupContent = document.createElement('div');
+            const title = document.createElement('strong');
+            title.textContent = facilityTitle;
+            popupContent.appendChild(title);
+            const categoryText = document.createElement('div');
+            categoryText.textContent = labelMap[item.category] || 'Support location';
+            popupContent.appendChild(categoryText);
+            if (item.address && item.address !== 'Address not available') {
+              const addressText = document.createElement('div');
+              addressText.textContent = 'Address: ' + item.address;
+              popupContent.appendChild(addressText);
+            }
+
+            const distanceKm = getDistanceKm(originLatitude, originLongitude, item.lat, item.lon);
+            if (Number.isFinite(distanceKm)) {
+              const distanceText = document.createElement('div');
+              distanceText.textContent = 'Approx. straight-line distance: ' + formatDistance(distanceKm * 1000);
+              popupContent.appendChild(distanceText);
+            }
+
+            const canRoute = !!(originLat && originLng && originLat.value && originLng.value);
+            if (canRoute) {
+              const directionsButton = document.createElement('button');
+              directionsButton.type = 'button';
+              directionsButton.className = 'route-button';
+              directionsButton.style.marginTop = '8px';
+              directionsButton.textContent = 'DIRECTIONS';
+              directionsButton.addEventListener('click', function() {
+                destinationLabel = facilityTitle;
+                destinationField.value = facilityTitle;
+                calculateRouteFromCoordinates(item.lat, item.lon, facilityTitle);
+                marker.closePopup();
+              });
+              popupContent.appendChild(directionsButton);
+            }
+            marker.bindPopup(popupContent);
             marker.addTo(nearbyCategoryLayers[item.category]);
             totalMarkers += 1;
           });
         });
 
         if (!totalMarkers) {
-          routeStatusForMessage('No nearby support locations found in OpenStreetMap.', false);
+          setNearbyFacilitiesStatus(
+            searchedRadiusMeters === fallbackRadiusMeters
+              ? 'OpenStreetMap returned no safety facilities with usable coordinates within 1 km after the 5 km search timed out. You can retry.'
+              : 'OpenStreetMap returned no safety facilities with usable coordinates within 5 km. You can retry.',
+            true
+          );
+        } else {
+          const facilityCount = Object.keys(safetyGroups).reduce(function(total, category) {
+            return total + safetyGroups[category].length;
+          }, 0);
+          const foundSummary = facilityCount + ' mapped safety facilit' + (facilityCount === 1 ? 'y' : 'ies') + ' found.';
+          setNearbyFacilitiesStatus(
+            searchedRadiusMeters === fallbackRadiusMeters
+              ? foundSummary + ' Showing results within 1 km because the 5 km search timed out.'
+              : foundSummary + ' Choose a category above to filter map markers.',
+            false
+          );
         }
 
         if (routeLayer) routeLayer.bringToFront();
-        if (currentMarker) currentMarker.bringToFront();
-        if (destinationMarker) destinationMarker.bringToFront();
+        if (currentMarker) currentMarker.setZIndexOffset(1000);
+        if (destinationMarker) destinationMarker.setZIndexOffset(1001);
       })
-      .catch(function() {
-        routeStatusForMessage('Nearby places are temporarily unavailable.', false);
+      .catch(function(error) {
+        if (requestId !== nearbySearchRequest) return;
+        if (timedOut || error.name === 'AbortError' || error.message === 'timeout') {
+          setNearbyFacilitiesStatus(
+            searchedRadiusMeters === fallbackRadiusMeters
+              ? 'The 1 km OpenStreetMap nearby-facility search timed out after the 5 km search also timed out. Please retry.'
+              : 'The OpenStreetMap nearby-facility search timed out. Please retry in a moment.',
+            true
+          );
+        } else {
+          setNearbyFacilitiesStatus('Nearby safety facilities are temporarily unavailable. Check your connection and retry.', true);
+        }
+      })
+      .finally(function() {
+        window.clearTimeout(timeoutId);
+        if (requestId !== nearbySearchRequest) return;
+        nearbyFacilitiesLoading = false;
+        if (retryNearbyFacilitiesButton) retryNearbyFacilitiesButton.disabled = false;
       });
+  }
+
+  if (retryNearbyFacilitiesButton) {
+    retryNearbyFacilitiesButton.addEventListener('click', function() {
+      if (nearbySearchOrigin && !nearbyFacilitiesLoading) {
+        queryNearbyPlaces(nearbySearchOrigin.lat, nearbySearchOrigin.lng);
+      }
+    });
   }
 
   document.querySelectorAll('[data-safety-category]').forEach(function(toggle) {
@@ -1003,6 +1247,7 @@ body {
       .then(function(data) {
         if (!data || !data.routes || !data.routes.length) throw new Error('Unable to calculate route');
         routeData = data;
+        routeCalculatedAt = Date.now();
         selectedRouteIndex = 0;
         activeStepIndex = 0;
         lastSpokenInstruction = '';
@@ -1153,21 +1398,23 @@ body {
         return;
       }
 
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-      }
+      startJourneyButton.disabled = true;
+      persistAndStartJourney().then(function() {
+        if (watchId !== null) {
+          navigator.geolocation.clearWatch(watchId);
+        }
 
-      journeyActive = true;
-      lastPosition = null;
-      activeStepIndex = 0;
-      lastSpokenInstruction = '';
-      if (navigationInstruction) navigationInstruction.style.display = 'block';
-      if (navigationBottomPanel) navigationBottomPanel.style.display = 'block';
-      updateNavigationInstruction();
-      updateNavigationMetrics();
-      showStatus('🟢 Navigation active', true);
+        journeyActive = true;
+        lastPosition = null;
+        activeStepIndex = 0;
+        lastSpokenInstruction = '';
+        if (navigationInstruction) navigationInstruction.style.display = 'block';
+        if (navigationBottomPanel) navigationBottomPanel.style.display = 'block';
+        updateNavigationInstruction();
+        updateNavigationMetrics();
+        showStatus('🟢 Navigation active', true);
 
-      watchId = navigator.geolocation.watchPosition(function(position) {
+        watchId = navigator.geolocation.watchPosition(function(position) {
         if (!journeyActive) {
           return;
         }
@@ -1182,7 +1429,6 @@ body {
 
         setLocationFromPosition(position);
         placeCurrentLocationMarker(position);
-        currentPosition = { latitude: currentLat, longitude: currentLng };
         updateNavigationProgress(currentLat, currentLng);
 
         if (destinationLatLng) {
@@ -1212,14 +1458,21 @@ body {
         }
 
         lastPosition = { latitude: currentLat, longitude: currentLng };
-      }, function() {
-        if (journeyActive) {
-          showStatus('Journey Active. Location monitoring active. Unable to recalculate route.', true);
-        }
-      }, {
-        enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 10000
+        }, function() {
+          if (journeyActive) {
+            showStatus('Journey active. Location unavailable; route recalculation may not work.', true);
+          }
+        }, {
+          enableHighAccuracy: true,
+          maximumAge: 5000,
+          timeout: 10000
+        });
+      }).catch(function(error) {
+        journeyStartPending = false;
+        alert(error.message || 'The journey could not be started.');
+        showStatus(error.message || 'The journey could not be started.', false);
+      }).then(function() {
+        startJourneyButton.disabled = false;
       });
     });
   }
@@ -1264,3 +1517,4 @@ body {
   });
 })();
 </script>
+{% endblock %}

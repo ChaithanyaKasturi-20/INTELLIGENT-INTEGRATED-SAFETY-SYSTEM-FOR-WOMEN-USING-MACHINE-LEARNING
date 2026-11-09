@@ -1,15 +1,8 @@
+{% extends "base.html" %}
 {% load static %}
-<html>
-<head>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Safety Timer</title>
-<meta name="keywords" content="" />
-<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+{% block title %}Safety Timer{% endblock %}
+{% block page_head %}
 <style>
-body {
-  background-image: url("{% static 'images/back.jpg' %}");
-}
 .card {
   width: auto;
   max-width: none;
@@ -18,10 +11,6 @@ body {
   background: transparent;
   border-radius: 0;
   box-shadow: none;
-}
-#page.panic-page #content {
-  float: none;
-  width: auto;
 }
 .timer-box {
   background: #fff;
@@ -90,24 +79,9 @@ button.safe {
   .status-box form { display: block !important; margin: 8px 0 !important; }
 }
 </style>
-</head>
-<body>
-<div id="header">
-  <div id="logo">
-    <h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1>
-  </div>
-  <div id="menu">
-    <ul>
-      <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
-      <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
-      <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
-      <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
-      <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
-      <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
-    </ul>
-  </div>
-</div>
-
+{% endblock %}
+{% block body_class %}{% endblock %}
+{% block content %}
 <div id="wrapper">
   <div id="page" class="panic-page">
     <div id="content">
@@ -126,9 +100,12 @@ button.safe {
 
             <div class="status-box" style="background:#fffaf3; border-color:#d9d9d9; margin-top:12px; margin-bottom:10px;">
               <strong>Emergency alerts:</strong><br />
-              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) accepted for delivery</span><br />
-              <span style="color:#b30000;">✗ {{ delivery_summary.failed }} email(s) failed</span><br />
+              <span style="color:#1d8f4d;">✓ {{ delivery_summary.email_accepted }} email(s) accepted by SMTP (not proof of receipt)</span><br />
+              <span style="color:#b30000;">✗ {{ delivery_summary.email_failed }} email(s) failed</span><br />
               <span style="color:#8a6d1d;">⚠ {{ delivery_summary.no_email }} contact(s) have no email</span>
+              {% if delivery_summary.ineligible_email_contacts %}
+                <br /><span style="color:#8a6d1d;">⚠ {{ delivery_summary.ineligible_email_contacts }} contact(s) need email consent and verification</span>
+              {% endif %}
             </div>
 
             <form method="post" action="{% url 'UpdateSOSStatus' %}" style="display: inline;">
@@ -146,9 +123,32 @@ button.safe {
             {% else %}
               <p><strong>Status:</strong> <span class="warning">SAFETY TIMER ACTIVE</span></p>
             {% endif %}
-            <div id="countdownDisplay" class="countdown-number">00:00</div>
-            <p class="small-note">Expires: <span id="expiryDisplay">--</span></p>
-            <p class="small-note">Expiry processing runs when this page is open or next visited; this is not background monitoring.</p>
+            {% if checkin and checkin.status == "SCHEDULED" %}
+              <div id="countdownDisplay" class="countdown-number">00:00</div>
+              <p class="small-note">Next check-in: <span id="expiryDisplay">--</span></p>
+            {% elif checkin and checkin.status == "DUE" %}
+              <p class="small-note warning"><strong>Check-in due.</strong> Please confirm you are safe before {{ checkin.grace_deadline|date:"g:i A" }}.</p>
+            {% endif %}
+            <p class="small-note">Check-ins are processed by the scheduled safety-check command. This page does not provide background phone monitoring.</p>
+            {% if checkin %}
+              <p><strong>Check-in:</strong> {{ checkin.get_status_display }}{% if checkin.status == 'DUE' %} — please confirm you are safe before {{ checkin.grace_deadline|date:"g:i A" }}.{% endif %}</p>
+            {% endif %}
+            {% if timer.guardian_enabled %}
+              <p class="small-note">Selected trusted contacts are notified only if this check-in remains unconfirmed after its grace period.</p>
+            {% endif %}
+            <p class="small-note">
+              {% if device_heartbeat_stale %}Foreground browser heartbeat is stale or unavailable; the page may be closed or the device offline.{% else %}Last foreground browser heartbeat: {{ timer.last_device_seen_at|timesince }} ago.{% endif %}
+              This is separate from GPS status and is not proof of an emergency.
+            </p>
+            {% if timer.location_status == "UNAVAILABLE" %}
+              <p class="small-note">GPS is unavailable; this is separate from the browser heartbeat.</p>
+            {% elif timer.location_status == "PENDING" %}
+              <p class="small-note">Opted-in GPS is waiting for its first foreground update.</p>
+            {% elif timer.location_status == "AVAILABLE" %}
+              <p class="small-note">Opted-in coordinates updated {{ timer.last_location_updated_at|timesince }} ago; accuracy {% if timer.last_known_accuracy_meters != None %}{{ timer.last_known_accuracy_meters }} m{% else %}unavailable{% endif %}.</p>
+            {% else %}
+              <p class="small-note">Location sharing is not enabled.</p>
+            {% endif %}
             <div style="margin-top: 20px;">
               <form method="post" action="{% url 'SafetyTimerSafe' %}" style="display: inline;">
                 {% csrf_token %}
@@ -159,6 +159,34 @@ button.safe {
                 <button class="secondary" type="submit">CANCEL TIMER</button>
               </form>
             </div>
+          </div>
+        {% elif timer and timer.status == 'EXPIRED' or timer and timer.status == 'UNCONFIRMED' %}
+          <div class="status-box active-status" role="status">
+            <p><strong>Status:</strong> <span class="warning">{% if timer.status == 'UNCONFIRMED' %}CHECK-IN UNCONFIRMED{% else %}CHECK-IN DUE{% endif %}</span></p>
+            <p>A missed check-in or unavailable location is not proof of an emergency. Confirm you are safe, or cancel the timer if it is no longer needed.</p>
+            {% if checkin %}
+              <p>Scheduled: {{ checkin.scheduled_at|date:"Y-m-d H:i T" }}. Grace deadline: {{ checkin.grace_deadline|date:"Y-m-d H:i T" }}.</p>
+              <p>Reminder records: {{ checkin.reminder_count }}. Browser notifications may be unavailable when this page is closed or the device is offline.</p>
+            {% endif %}
+            {% if timer.status == 'EXPIRED' %}
+              <form method="post" action="{% url 'SafetyTimerExtend' %}" style="display:inline;">
+                {% csrf_token %}
+                <label for="timerExtensionMinutes">Extend timer by</label>
+                <select id="timerExtensionMinutes" name="minutes">
+                  <option value="5">5 minutes</option>
+                  <option value="10">10 minutes</option>
+                  <option value="15">15 minutes</option>
+                  <option value="30">30 minutes</option>
+                </select>
+                <button class="secondary" type="submit">EXTEND TIMER</button>
+              </form>
+            {% endif %}
+            <form method="post" action="{% url 'SafetyTimerSafe' %}" style="display:inline;">
+              {% csrf_token %}<button class="safe" type="submit">I'M SAFE — CONFIRM</button>
+            </form>
+            <form method="post" action="{% url 'SafetyTimerCancel' %}" style="display:inline; margin-left:12px;">
+              {% csrf_token %}<button class="secondary" type="submit">CANCEL TIMER</button>
+            </form>
           </div>
         {% else %}
           <div class="timer-box">
@@ -176,6 +204,32 @@ button.safe {
                   {{ option }} minutes
                 </label>
               {% endfor %}
+              <div class="timer-duration">
+                <label for="checkin_interval_minutes">Check in every</label>
+                <select id="checkin_interval_minutes" name="checkin_interval_minutes">
+                  {% for option in checkin_intervals %}<option value="{{ option }}" {% if option == 15 %}selected{% endif %}>{{ option }} minutes</option>{% endfor %}
+                </select>
+              </div>
+              <div class="timer-duration">
+                <label for="grace_period_minutes">Grace period</label>
+                <select id="grace_period_minutes" name="grace_period_minutes">
+                  {% for option in grace_periods %}<option value="{{ option }}" {% if option == 15 %}selected{% endif %}>{{ option }} minutes</option>{% endfor %}
+                </select>
+              </div>
+              {% if guardian_contacts %}
+                <fieldset class="timer-duration" style="text-align:left;">
+                  <legend>Optional contact notifications</legend>
+                  <label><input type="checkbox" name="guardian_enabled" value="true" /> Notify selected contacts after the grace period</label>
+                  {% for contact in guardian_contacts %}
+                    <label style="display:block;"><input type="checkbox" name="guardian_contact_ids" value="{{ contact.pk }}" /> {{ contact.name }} ({{ contact.email }})</label>
+                  {% endfor %}
+                </fieldset>
+              {% else %}
+                <p class="small-note">No contacts currently have both verified email addresses and recorded email consent.</p>
+              {% endif %}
+              <p><label><input type="checkbox" name="auto_sos_on_unconfirmed" value="true" /> If still unconfirmed 15 minutes after the grace period, use the existing SOS workflow</label></p>
+              <p><label><input type="checkbox" name="share_location_with_contacts" value="true" /> Share foreground GPS coordinates, accuracy, and timestamp with selected contacts</label></p>
+              <p class="small-note">Location sharing is optional. GPS failure is recorded separately from a missing browser heartbeat and never proves an emergency.</p>
               <div style="margin-top: 18px;">
                 <button type="submit">START SAFETY TIMER</button>
               </div>
@@ -193,7 +247,8 @@ button.safe {
     const expiryText = document.getElementById('expiryDisplay');
     if (!timerText || !expiryText) return;
 
-    const expiresAtMs = Number('{{ timer.expires_at|date:"U" }}') * 1000;
+    const expiresAtMs = Number('{{ checkin.scheduled_at|date:"U" }}') * 1000;
+    let expiryReloadScheduled = false;
 
     function updateExpiryText() {
       const localDate = new Date(expiresAtMs);
@@ -211,7 +266,11 @@ button.safe {
       updateExpiryText();
 
       if (remainingSeconds <= 0) {
-        window.location.reload();
+        timerText.textContent = 'CHECK IN';
+        if (!expiryReloadScheduled) {
+          expiryReloadScheduled = true;
+          window.setTimeout(function() { window.location.reload(); }, 1000);
+        }
       }
     }
 
@@ -219,5 +278,46 @@ button.safe {
     setInterval(updateCountdown, 1000);
   })();
 </script>
-</body>
-</html>
+{% if timer and timer.status == 'ACTIVE' %}
+<script>
+  (function() {
+    const consent = {{ timer.share_location_with_contacts|yesno:"true,false" }};
+    const endpoint = "{% url 'SafetyCheckInLocation' %}";
+    const csrfInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+    if (!csrfInput) return;
+    const csrfToken = csrfInput.value;
+
+    function report(status, position) {
+      const payload = {owner_type: 'timer', owner_id: {{ timer.pk }}, location_status: status};
+      if (position) {
+        payload.latitude = position.coords.latitude;
+        payload.longitude = position.coords.longitude;
+        payload.accuracy_meters = position.coords.accuracy;
+      }
+      fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify(payload),
+        credentials: 'same-origin'
+      }).catch(function() {});
+    }
+
+    function heartbeat() {
+      if (!consent) {
+        report('NOT_SHARED');
+      } else if (!navigator.geolocation) {
+        report('UNAVAILABLE');
+      } else {
+        navigator.geolocation.getCurrentPosition(
+          function(position) { report('AVAILABLE', position); },
+          function() { report('UNAVAILABLE'); },
+          {enableHighAccuracy: true, maximumAge: 30000, timeout: 10000}
+        );
+      }
+    }
+    heartbeat();
+    window.setInterval(heartbeat, 60000);
+  })();
+</script>
+{% endif %}
+{% endblock %}

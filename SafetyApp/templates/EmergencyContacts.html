@@ -1,12 +1,8 @@
+{% extends "base.html" %}
 {% load static %}
-<html>
-<head>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Emergency Contacts</title>
-<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+{% block title %}Emergency Contacts{% endblock %}
+{% block page_head %}
 <style>
-body { background-image: url("{% static 'images/back.jpg' %}"); }
 .container { width: 100%; max-width: 1000px; margin: 20px auto; padding: 20px; }
 .contact-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 20px; }
 .contact-card {
@@ -48,24 +44,9 @@ input[type=text], input[type=email], input[type=tel] { width: 100%; max-width: 3
     .actions a, .actions button, .primary-btn, .cancel-btn { margin: 4px 4px 0 0; padding: 10px 12px; }
 }
 </style>
-</head>
-<body>
-<div id="header">
-    <div id="logo">
-        <h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1>
-    </div>
-    <div id="menu">
-        <ul>
-            <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
-            <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
-            <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
-            <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
-            <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
-            <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
-        </ul>
-    </div>
-</div>
-
+{% endblock %}
+{% block body_class %}{% endblock %}
+{% block content %}
 <div class="container">
     <h2>Emergency Contacts</h2>
     <p><a href="#add-contact" class="primary-btn">+ Add Emergency Contact</a></p>
@@ -91,6 +72,10 @@ input[type=text], input[type=email], input[type=tel] { width: 100%; max-width: 3
                     <tr>
                         <td>Phone Number</td>
                         <td><input type="tel" name="phone_number" value="{{ form_data.phone_number|default:edit_contact.phone_number|default:'' }}" required /></td>
+                    </tr>
+                    <tr>
+                        <td>Alternative Phone (optional)</td>
+                        <td><input type="tel" name="alternative_phone_number" value="{{ form_data.alternative_phone_number|default:edit_contact.alternative_phone_number|default:'' }}" /></td>
                     </tr>
                     <tr>
                         <td>Email (optional)</td>
@@ -129,6 +114,7 @@ input[type=text], input[type=email], input[type=tel] { width: 100%; max-width: 3
                 {% if contact.is_active %}<span class="badge">Active</span>{% else %}<span class="badge inactive">Disabled</span>{% endif %}
                 <div class="meta"><strong>Relationship:</strong> {{ contact.relationship|default:'Not specified' }}</div>
                 <div class="meta"><strong>Phone:</strong> {{ contact.phone_number }}</div>
+                {% if contact.alternative_phone_number %}<div class="meta"><strong>Alternative phone:</strong> {{ contact.alternative_phone_number }}</div>{% endif %}
                 {% if contact.email %}<div class="meta"><strong>Email:</strong> {{ contact.email }}</div>{% endif %}
                 <div class="actions">
                     <a href="{% url 'EmergencyContactEdit' contact.id %}">Edit</a>
@@ -148,5 +134,4 @@ input[type=text], input[type=email], input[type=tel] { width: 100%; max-width: 3
         {% endfor %}
     </div>
 </div>
-</body>
-</html>
+{% endblock %}

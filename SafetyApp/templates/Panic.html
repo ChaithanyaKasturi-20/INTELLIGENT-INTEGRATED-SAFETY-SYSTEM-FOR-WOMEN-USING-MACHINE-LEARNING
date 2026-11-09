@@ -1,15 +1,8 @@
+{% extends "base.html" %}
 {% load static %}
-<html>
-<head>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>SOS Emergency Activation</title>
-<meta name="keywords" content="" />
-<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+{% block title %}SOS Emergency Activation{% endblock %}
+{% block page_head %}
 <style>
-body {
-  background-image: url("{% static 'images/back.jpg' %}");
-}
 .card {
   width: auto;
   max-width: none;
@@ -18,10 +11,6 @@ body {
   background: transparent;
   border-radius: 0;
   box-shadow: none;
-}
-#page.panic-page #content {
-  float: none;
-  width: auto;
 }
 .status-box {
   background: #fff3f3;
@@ -220,24 +209,9 @@ button.emergency {
   }
 }
 </style>
-</head>
-<body>
-<div id="header">
-  <div id="logo">
-    <h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1>
-  </div>
-  <div id="menu">
-    <ul>
-      <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
-      <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
-      <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
-      <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
-      <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
-      <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
-    </ul>
-  </div>
-</div>
-
+{% endblock %}
+{% block body_class %}{% endblock %}
+{% block content %}
 <div id="wrapper">
   <div id="page" class="panic-page">
     <div id="content">
@@ -269,11 +243,17 @@ button.emergency {
 
             <div class="status-box" style="background:#fffaf3; border-color:#d9d9d9; margin-top:12px; margin-bottom:10px;">
               <strong>Emergency alerts:</strong><br />
-              <span style="color:#1d8f4d;">✓ {{ delivery_summary.sent }} email(s) accepted for delivery</span><br />
-              <span style="color:#b30000;">✗ {{ delivery_summary.failed }} email(s) failed</span><br />
+              <span style="color:#1d8f4d;">✓ {{ delivery_summary.email_accepted }} email(s) accepted by SMTP (not proof of receipt)</span><br />
+              <span style="color:#b30000;">✗ {{ delivery_summary.email_failed }} email(s) failed</span><br />
               <span style="color:#8a6d1d;">⚠ {{ delivery_summary.no_email }} contact(s) have no email</span>
-              {% if delivery_summary.pending %}
-                <br /><span style="color:#555;">⏳ {{ delivery_summary.pending }} email(s) pending</span>
+              {% if delivery_summary.ineligible_email_contacts %}
+                <br /><span style="color:#8a6d1d;">⚠ {{ delivery_summary.ineligible_email_contacts }} contact(s) need email consent and verification</span>
+              {% endif %}
+              {% if delivery_summary.email_pending %}
+                <br /><span style="color:#555;">⏳ {{ delivery_summary.email_pending }} email(s) pending</span>
+              {% endif %}
+              {% if delivery_summary.email_uncertain %}
+                <br /><span style="color:#8a6d1d;">? {{ delivery_summary.email_uncertain }} email outcome(s) uncertain; automatic retry is blocked</span>
               {% endif %}
             </div>
 
@@ -296,7 +276,7 @@ button.emergency {
           </form>
 
           <p id="activationLocationStatus" class="small-note" role="status" aria-live="polite"></p>
-          <p class="small-note">You can activate SOS only once at a time. Local GPS tracking works without email configuration. External contacts need a configured public HTTPS link; a 127.0.0.1 address is reachable only from this device.</p>
+          <p class="small-note">You can activate SOS only once at a time. A public HTTPS URL is needed only for a live-location link; basic email alerts with saved coordinates do not depend on it.</p>
         {% endif %}
 
         <hr class="section-divider" />
@@ -423,9 +403,13 @@ button.emergency {
           if (currentAttempt !== activationAttempt) return;
           document.getElementById('latitude').value = '';
           document.getElementById('longitude').value = '';
-          finishLocation(error.code === error.PERMISSION_DENIED
-            ? 'Location permission denied. SOS will activate without a location.'
-            : 'Could not obtain your location. SOS will activate without a location.');
+          if (error.code === error.PERMISSION_DENIED) {
+            finishLocation('Location permission denied. SOS will activate without a location.');
+          } else if (error.code === error.TIMEOUT) {
+            finishLocation('Location request timed out. SOS will activate without a location.');
+          } else {
+            finishLocation('Location is unavailable. SOS will activate without a location.');
+          }
         }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 });
       }
 
@@ -467,5 +451,4 @@ button.emergency {
     });
   })();
 </script>
-</body>
-</html>
+{% endblock %}

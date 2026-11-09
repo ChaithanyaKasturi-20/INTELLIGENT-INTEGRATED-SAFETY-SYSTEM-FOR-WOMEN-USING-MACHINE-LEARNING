@@ -1,12 +1,7 @@
+{% extends "base.html" %}
 {% load static %}
-<html>
-<head>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</title>
-<meta name="keywords" content="" />
-<meta name="Premium Series" content="" />
-<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+{% block title %}INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING{% endblock %}
+{% block page_head %}
 <script language="javascript">
 	function validate(formObj)
 	{
@@ -20,34 +15,24 @@
 	}	
 	</script>
 <style>
-body {
-  background-image: url("{% static 'images/back.jpg' %}");
-}
+	#content .flower {
+		padding-left: 0;
+		text-align: center;
+	}
+
+	#content .flower img {
+		display: block;
+		width: min(100%, 800px);
+		max-width: 100%;
+		height: auto;
+		margin: 0 auto;
+		object-fit: contain;
+		object-position: center;
+	}
 </style>
-</head>
-<body>
-<!-- start header -->
-<div id="header">
-	<div id="logo">
-		<h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font>
-
-</center></span></h1>
-		
-	</div>
-	<div id="menu">
-		<ul>      
-     <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
-	 <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
-	 <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
-	 <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
-	 <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
-<li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
-   </ul>     
-		
-	</div>
-	
-</div>
-
+{% endblock %}
+{% block body_class %}{% endblock %}
+{% block content %}
 <div id="wrapper">
 	<!-- start page -->
 	<div id="page">
@@ -89,7 +74,4 @@ body {
 	</div>
 	<!-- end page -->
 </div>
-</body>
-</html>
-
-
+{% endblock %}

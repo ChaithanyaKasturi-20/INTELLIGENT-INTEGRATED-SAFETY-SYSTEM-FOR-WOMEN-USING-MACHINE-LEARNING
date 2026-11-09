@@ -1,0 +1,260 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Intelligent Integrated Safety System for Women Using Machine Learning{% endblock %}</title>
+  <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
+  {% block page_head %}{% endblock %}
+  <link href="{% static 'site-layout.css' %}?v=12" rel="stylesheet" type="text/css" media="screen" />
+</head>
+<body class="site-body {% block body_class %}{% endblock %}">
+  <header id="header" class="site-header">
+    <div id="logo" class="site-brand">
+      <a href="{% url 'index' %}">
+        <h1>Intelligent Integrated Safety System for Women Using Machine Learning</h1>
+      </a>
+    </div>
+    <nav id="menu" class="site-navigation" aria-label="Main navigation">
+      <ul id="main">
+        <li><a href="{% url 'index' %}">Home</a></li>
+        {% if force_guest_navigation %}
+          <li><a href="{% url 'UserLogin' %}">Login</a></li>
+          <li><a href="{% url 'Register' %}">Register</a></li>
+        {% elif request.session.is_logged_in and request.session.username %}
+          <li><a href="{% url 'Route' %}">Route Routing</a></li>
+          <li><a href="{% url 'CrimePredict' %}">Crime Prediction</a></li>
+          <li><a href="{% url 'Panic' %}">Panic / SOS</a></li>
+          <li><a href="{% url 'Heatmap' %}">Heatmap</a></li>
+          <li>
+            <details class="site-dropdown">
+              <summary>More Features</summary>
+              <div class="site-dropdown-panel">
+                <a href="{% url 'SafetyTimer' %}">Safety Timer</a>
+                <a href="{% url 'CommunityReports' %}">Community Reports</a>
+                <a href="{% url 'TrainML' %}">Train Neural Network</a>
+              </div>
+            </details>
+          </li>
+          <li>
+            <details class="site-dropdown">
+              <summary class="site-account-summary">{{ request.session.username }}</summary>
+              <div class="site-dropdown-panel site-dropdown-panel-end">
+                <a href="{% url 'MyAccount' %}">My Profile</a>
+                <a href="{% url 'EmergencyContacts' %}">Emergency Contacts</a>
+                <a href="{% url 'Journeys' %}">My Journeys</a>
+                <a href="{% url 'Logout' %}">Logout</a>
+              </div>
+            </details>
+          </li>
+        {% else %}
+          <li><a href="{% url 'UserLogin' %}">Login</a></li>
+          <li><a href="{% url 'Register' %}">Register</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </header>
+
+  <main class="site-main">
+    {% if request.session.is_logged_in and request.session.username and not force_guest_navigation %}
+    <form id="safetyCheckInCsrf" hidden>{% csrf_token %}</form>
+    <section id="safetyCheckInNotice" class="safety-checkin-notice" aria-live="polite" aria-label="Safety check-in reminders" hidden>
+      <div>
+        <p class="home-eyebrow">Safety check-in</p>
+        <h2>Reminder</h2>
+        <ul id="safetyCheckInReminderList"></ul>
+      </div>
+      <button id="enableSafetyNotifications" type="button">Enable browser alerts</button>
+      <p id="safetyNotificationPermission" class="safety-notification-permission"></p>
+    </section>
+    {% endif %}
+    <div class="site-page">
+      <div class="site-content">
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    {% if request.path == '/' or request.path == '/index.html' %}
+    <div class="dashboard-footer-inner">
+      <div class="dashboard-footer-brand">
+        <span class="dashboard-footer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 2.5 19 5v6.2c0 4.7-2.9 8.2-7 10.3-4.1-2.1-7-5.6-7-10.3V5l7-2.5Z"/><path d="m8.6 12 2.1 2.1 4.7-4.7"/></svg>
+        </span>
+        <span>Intelligent Integrated Safety System<br>for Women Using Machine Learning</span>
+      </div>
+      <nav class="dashboard-footer-links" aria-label="Footer navigation">
+        <a href="{% url 'index' %}">Home</a>
+        <a href="#account-overview">About</a>
+        {% if request.session.is_logged_in and request.session.username and not force_guest_navigation %}
+          <a href="{% url 'Route' %}">Help</a>
+          <a href="{% url 'MyAccount' %}">Privacy</a>
+          <a href="{% url 'EmergencyContacts' %}">Contact</a>
+        {% else %}
+          <a href="{% url 'UserLogin' %}">Help</a>
+          <a href="{% url 'UserLogin' %}">Privacy</a>
+          <a href="{% url 'UserLogin' %}">Contact</a>
+        {% endif %}
+      </nav>
+      <p class="dashboard-footer-message">Stay Safe. Stay Strong.</p>
+    </div>
+    {% else %}
+      <p>Intelligent Integrated Safety System for Women Using Machine Learning</p>
+    {% endif %}
+  </footer>
+  <script>
+    document.querySelectorAll('.site-dropdown details.site-dropdown, details.site-dropdown').forEach(function (dropdown) {
+      dropdown.addEventListener('toggle', function () {
+        if (!dropdown.open) return;
+        document.querySelectorAll('details.site-dropdown[open]').forEach(function (other) {
+          if (other !== dropdown) other.open = false;
+        });
+      });
+    });
+    document.addEventListener('click', function (event) {
+      document.querySelectorAll('details.site-dropdown[open]').forEach(function (dropdown) {
+        if (!dropdown.contains(event.target)) dropdown.open = false;
+      });
+    });
+  </script>
+  {% if request.session.is_logged_in and request.session.username %}
+  <script>
+    (function () {
+      var endpoint = "{% url 'SafetyCheckInReminders' %}";
+      var notice = document.getElementById('safetyCheckInNotice');
+      var list = document.getElementById('safetyCheckInReminderList');
+      var csrf = document.querySelector('#safetyCheckInCsrf input[name="csrfmiddlewaretoken"]');
+      var permissionButton = document.getElementById('enableSafetyNotifications');
+      var permissionText = document.getElementById('safetyNotificationPermission');
+      if (!notice || !list || !csrf) return;
+
+      function recordPresentation(reminder, channel) {
+        return fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrf.value
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            attempt_id: reminder.attempt_id,
+            claim_token: reminder.claim_token,
+            claim_generation: reminder.claim_generation,
+            delivery_channel: channel
+          })
+        }).catch(function () {
+          permissionText.textContent = 'A reminder was displayed locally, but its presentation receipt could not be saved. It may be offered again.';
+          notice.hidden = false;
+        });
+      }
+
+      function display(reminder) {
+        var storageKey = 'safety-checkin-presented-' + reminder.idempotency_key;
+        var alreadyShown = false;
+        try {
+          alreadyShown = window.sessionStorage.getItem(storageKey) === 'shown';
+        } catch (error) {
+          console.warn('Session storage is unavailable for reminder deduplication.');
+        }
+        var item = document.createElement('li');
+        var message = document.createElement('p');
+        var link = document.createElement('a');
+        message.textContent = reminder.message;
+        link.href = reminder.url;
+        link.textContent = 'Review check-in';
+        item.appendChild(message);
+        item.appendChild(link);
+        notice.hidden = false;
+
+        if (alreadyShown) {
+          list.appendChild(item);
+          recordPresentation(reminder, 'IN_APP');
+          return;
+        }
+
+        list.appendChild(item);
+        try {
+          window.sessionStorage.setItem(storageKey, 'shown');
+        } catch (error) {
+          console.warn('Session storage could not record the reminder presentation.');
+        }
+        var settled = false;
+        var fallback = window.setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          recordPresentation(reminder, 'IN_APP');
+        }, 1500);
+
+        if ('Notification' in window && Notification.permission === 'granted') {
+          try {
+            var browserNotice = new Notification(reminder.title, {
+              body: reminder.message,
+              tag: reminder.idempotency_key,
+              renotify: false
+            });
+            browserNotice.onshow = function () {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(fallback);
+              recordPresentation(reminder, 'BROWSER');
+            };
+            browserNotice.onerror = function () {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(fallback);
+              recordPresentation(reminder, 'IN_APP');
+            };
+            browserNotice.onclick = function () {
+              window.location.href = reminder.url;
+              browserNotice.close();
+            };
+          } catch (error) {
+            if (!settled) {
+              settled = true;
+              window.clearTimeout(fallback);
+              recordPresentation(reminder, 'IN_APP');
+            }
+          }
+        }
+      }
+
+      function poll() {
+        fetch(endpoint, {credentials: 'same-origin'})
+          .then(function (response) {
+            if (!response.ok) throw new Error('Reminder polling failed.');
+            return response.json();
+          })
+          .then(function (data) {
+            (data.reminders || []).forEach(display);
+          })
+          .catch(function () {
+            permissionText.textContent = 'The reminder service is temporarily unreachable; check-in status may be delayed.';
+            notice.hidden = false;
+          });
+      }
+
+      if (permissionButton) {
+        permissionButton.addEventListener('click', function () {
+          if (!('Notification' in window)) {
+            permissionText.textContent = 'Browser notifications are not supported. In-app reminders remain available while this page is open.';
+            return;
+          }
+          Notification.requestPermission().then(function (permission) {
+            permissionText.textContent = permission === 'granted'
+              ? 'Browser alerts enabled for this browser.'
+              : 'Permission was not granted. In-app reminders remain available while this page is open.';
+          }).catch(function () {
+            permissionText.textContent = 'Browser permission could not be updated. In-app reminders remain available while this page is open.';
+          });
+        });
+      }
+
+      poll();
+      window.setInterval(poll, 30000);
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

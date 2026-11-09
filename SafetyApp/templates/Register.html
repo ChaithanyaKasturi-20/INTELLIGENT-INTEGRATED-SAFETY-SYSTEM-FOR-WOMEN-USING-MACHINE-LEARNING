@@ -1,104 +1,168 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>New User Signup | Intelligent Integrated Safety System</title>
-  <link href="{% static 'default.css' %}?v=20261011-4" rel="stylesheet" type="text/css" media="screen" />
-</head>
-<body class="public-page" style="background-image: url('{% static 'images/back.jpg' %}');">
-  <header id="header" class="public-header">
-    <div id="logo">
-      <h1>Intelligent Integrated Safety System for Women Using Machine Learning</h1>
-    </div>
-    <nav id="menu" aria-label="Main navigation">
-      <ul id="main">
-        <li><a href="{% url 'index' %}">Home</a></li>
-        <li><a href="{% url 'UserLogin' %}">User Login Here</a></li>
-        <li class="current_page_item"><a href="{% url 'Register' %}" aria-current="page">New User Signup Here</a></li>
-      </ul>
-    </nav>
-  </header>
-
-  <div id="wrapper">
-    <main id="page">
-      <div id="content" class="public-content public-home-panel">
-        <div class="flower">
-          <img class="public-banner" src="{% static 'images/tra.jpg' %}" alt="" />
-        </div>
-        <section class="auth-panel" aria-labelledby="register-title">
-          <h2 id="register-title">New User Signup</h2>
-          {% for message in messages %}
-            <p class="auth-feedback {{ message.tags }}" role="alert" aria-live="assertive">{{ message }}</p>
-          {% endfor %}
-          {% if data %}
-            <p class="auth-feedback" role="status" aria-live="polite">{{ data }}</p>
-          {% endif %}
-          <form class="auth-form" name="f1" method="post" action="{% url 'RegisterAction' %}" onsubmit="return validate(this);">
-            {% csrf_token %}
-            <label for="register-username">Username</label>
-            <input id="register-username" type="text" name="t1" autocomplete="username" required />
-
-            <label for="register-password">Password</label>
-            <input id="register-password" type="password" name="t2" autocomplete="new-password" required />
-
-            <label for="register-phone">Contact number</label>
-            <input id="register-phone" type="tel" name="t3" autocomplete="tel" inputmode="numeric" required />
-
-            <label for="register-email">Emergency email address</label>
-            <input id="register-email" type="email" name="t4" autocomplete="email" required />
-
-            <label for="register-address">Address</label>
-            <input id="register-address" type="text" name="t5" autocomplete="street-address" required />
-
-            <button type="submit">Create account</button>
-          </form>
+{% block title %}New User Signup | Intelligent Integrated Safety System{% endblock %}
+{% block page_head %}
+{% endblock %}
+{% block body_class %}public-page{% endblock %}
+{% block content %}
+<div id="wrapper">
+    <div id="page">
+      <div id="content" class="public-content public-auth-layout">
+        <section class="auth-shell auth-shell-signup" aria-labelledby="register-title">
+          <div class="auth-panel auth-form-panel">
+            <div class="auth-brand">
+              <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 2.5 19 5v6.2c0 4.7-2.9 8.2-7 10.3-4.1-2.1-7-5.6-7-10.3V5l7-2.5Z"/><path d="m8.6 12 2.1 2.1 4.7-4.7"/></svg>
+              </span>
+              <span>Women's Safety</span>
+            </div>
+            <div class="auth-heading">
+              <h2 id="register-title">Create Your Account</h2>
+              <p>Join our safety network and take control of your personal safety.</p>
+            </div>
+            {% for message in messages %}
+              <p class="auth-feedback {{ message.tags }}" role="alert" aria-live="assertive">{{ message }}</p>
+            {% endfor %}
+            {% if data %}
+              <p class="auth-feedback error" role="status" aria-live="polite">{{ data }}</p>
+            {% endif %}
+            <form class="auth-form signup-form" name="f1" method="post" action="{% url 'RegisterAction' %}" onsubmit="return validate(this);">
+              {% csrf_token %}
+              <fieldset class="auth-group">
+                <legend>Account details</legend>
+                <div class="auth-field">
+                  <label for="register-username">Username</label>
+                  <div class="auth-input-wrap">
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"/></svg>
+                    <input id="register-username" type="text" name="t1" autocomplete="username" placeholder="Choose a username" required />
+                  </div>
+                </div>
+                <div class="auth-field">
+                  <label for="register-password">Password</label>
+                  <div class="auth-input-wrap">
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                    <input id="register-password" type="password" name="t2" autocomplete="new-password" placeholder="Create a strong password" required />
+                    <button class="password-toggle" type="button" data-password-target="register-password" aria-label="Show password" aria-pressed="false">
+                      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                  </div>
+                  <div class="password-strength" aria-live="polite">
+                    <div class="strength-bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                    <span class="strength-label">Password strength</span>
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset class="auth-group">
+                <legend>Emergency information</legend>
+                <div class="auth-grid-two">
+                  <div class="auth-field">
+                    <label for="register-phone">Contact number</label>
+                    <div class="auth-input-wrap">
+                      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.63a2 2 0 0 1-.45 2.11L8 9.73a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0 1 22 16.92Z"/></svg>
+                      <input id="register-phone" type="tel" name="t3" autocomplete="tel" inputmode="numeric" placeholder="Mobile number" required />
+                    </div>
+                  </div>
+                  <div class="auth-field">
+                    <label for="register-email">Emergency email</label>
+                    <div class="auth-input-wrap">
+                      <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+                      <input id="register-email" type="email" name="t4" autocomplete="email" placeholder="name@example.com" required />
+                    </div>
+                  </div>
+                </div>
+                <div class="auth-field">
+                  <label for="register-address">Address</label>
+                  <div class="auth-input-wrap">
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+                    <input id="register-address" type="text" name="t5" autocomplete="street-address" placeholder="Your address" required />
+                  </div>
+                </div>
+              </fieldset>
+              <button class="auth-submit" type="submit"><span>Create Account</span></button>
+            </form>
+            <p class="auth-switch">Already have an account? <a href="{% url 'UserLogin' %}">Sign In</a></p>
+          </div>
+          <div class="auth-visual" aria-label="Women's Safety protection illustration">
+            <div class="security-art" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="glass-shield">
+                <svg viewBox="0 0 160 180"><defs><linearGradient id="registerShield" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff" stop-opacity=".98"/><stop offset="1" stop-color="#ffcdd3" stop-opacity=".88"/></linearGradient></defs><path fill="url(#registerShield)" d="M80 8 142 30v48c0 50-25 78-62 94-37-16-62-44-62-94V30l62-22Z"/><path fill="#d9232e" d="m80 30 43 15v33c0 36-17 59-43 74-26-15-43-38-43-74V45l43-15Z"/><path fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" d="m58 90 14 14 31-34"/></svg>
+              </span>
+            </div>
+            <div class="auth-visual-copy">
+              <h3>Take the First Step Towards Safety</h3>
+              <p>Create your account to access safety tools, emergency contacts, location assistance and more.</p>
+            </div>
+            <span class="auth-tagline">SAFE <b>•</b> SECURE <b>•</b> CONNECTED</span>
+          </div>
         </section>
       </div>
-    </main>
+    </div>
   </div>
 
   <script>
     function validate(formObj) {
       if (formObj.t1.value.length === 0) {
-        alert("Please Enter Userame");
         formObj.t1.focus();
         return false;
       }
       if (formObj.t2.value.length === 0) {
-        alert("Please Enter Password");
         formObj.t2.focus();
         return false;
       }
       if (formObj.t3.value.length === 0) {
-        alert("Please Enter Contact No");
         formObj.t3.focus();
         return false;
       }
       if (isNaN(formObj.t3.value)) {
-        alert("Contact No must be numeric");
         formObj.t3.focus();
         return false;
       }
       if (formObj.t4.value.length === 0) {
-        alert("Please Enter Email Id");
         formObj.t4.focus();
         return false;
       }
       var filter = /^([a-zA-Z0-9_\.\-])+@([a-z]+\.)+(com)+$/;
       if (!filter.test(formObj.t4.value)) {
-        window.alert('Please enter valid email address');
         formObj.t4.focus();
         return false;
       }
       if (formObj.t5.value.length === 0) {
-        alert("Please Enter address");
         formObj.t5.focus();
         return false;
       }
+      var submit = formObj.querySelector('.auth-submit');
+      submit.classList.add('is-loading');
+      submit.setAttribute('aria-busy', 'true');
+      submit.querySelector('span').textContent = 'Creating account...';
       return true;
     }
+
+    document.querySelectorAll('.password-toggle').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var input = document.getElementById(button.dataset.passwordTarget);
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+        button.setAttribute('aria-pressed', show ? 'true' : 'false');
+      });
+    });
+
+    var passwordInput = document.getElementById('register-password');
+    var strength = document.querySelector('.password-strength');
+    if (passwordInput && strength) {
+      passwordInput.addEventListener('input', function () {
+        var value = passwordInput.value;
+        var score = 0;
+        if (value.length >= 8) score++;
+        if (/[A-Z]/.test(value) && /[a-z]/.test(value)) score++;
+        if (/[0-9]/.test(value)) score++;
+        if (/[^A-Za-z0-9]/.test(value)) score++;
+        strength.dataset.score = String(value ? score : 0);
+        strength.querySelector('.strength-label').textContent =
+          value ? ['Very weak', 'Weak', 'Fair', 'Good', 'Strong'][score] + ' password' : 'Password strength';
+      });
+    }
   </script>
-</body>
-</html>
+{% endblock %}

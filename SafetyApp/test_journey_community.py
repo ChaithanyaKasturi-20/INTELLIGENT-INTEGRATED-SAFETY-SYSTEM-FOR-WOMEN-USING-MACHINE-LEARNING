@@ -1,11 +1,13 @@
 import io
 import os
-from datetime import timedelta
+import uuid
+from datetime import datetime, timedelta
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import DatabaseError
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
@@ -18,13 +20,17 @@ from .models import (
     JourneyActivity,
     JourneyCheckInAlert,
     JourneyCheckInDelivery,
+    SafetyCheckIn,
+    SafetyCheckInAttempt,
     SOSEvent,
 )
 from .views import ensure_register_table
+from .test_utils import isolate_register_test_database
 
 
 class JourneyFeatureTestCase(TestCase):
     def setUp(self):
+        isolate_register_test_database(self)
         ensure_register_table()
         self.client = Client()
         self.owner = 'journey-owner'
@@ -39,6 +45,8 @@ class JourneyFeatureTestCase(TestCase):
             phone_number='+1 555 555 0100',
             email='trusted@example.test',
             is_active=True,
+            email_consent=True,
+            email_verified_at=timezone.now(),
         )
 
     def valid_plan(self, **overrides):
@@ -160,6 +168,62 @@ class JourneyFeatureTestCase(TestCase):
         self.assertGreater(journey.expected_arrival, timezone.now() + timedelta(minutes=29))
         self.assertFalse(SOSEvent.objects.exists())
 
+    def test_journey_confirmation_does_not_resolve_sos_linked_to_another_journey(self):
+        now = timezone.now()
+        journey = Journey.objects.create(
+            user=self.owner,
+            origin_label='Origin',
+            origin_latitude=1,
+            origin_longitude=1,
+            destination_label='Destination',
+            destination_latitude=2,
+            destination_longitude=2,
+            distance_meters=1000,
+            estimated_duration_seconds=600,
+            planned_departure=now,
+            expected_arrival=now + timedelta(minutes=30),
+            status=Journey.STATUS_UNCONFIRMED,
+        )
+        other_journey = Journey.objects.create(
+            user=self.owner,
+            origin_label='Other origin',
+            origin_latitude=3,
+            origin_longitude=3,
+            destination_label='Other destination',
+            destination_latitude=4,
+            destination_longitude=4,
+            distance_meters=1000,
+            estimated_duration_seconds=600,
+            planned_departure=now,
+            expected_arrival=now + timedelta(minutes=30),
+            status=Journey.STATUS_UNCONFIRMED,
+        )
+        event = SOSEvent.objects.create(
+            user=self.owner,
+            status=SOSEvent.STATUS_ACTIVE,
+        )
+        SafetyCheckIn.objects.create(
+            journey=journey,
+            sequence=1,
+            scheduled_at=now - timedelta(minutes=15),
+            grace_deadline=now - timedelta(minutes=1),
+            status=SafetyCheckIn.STATUS_UNCONFIRMED,
+        )
+        SafetyCheckIn.objects.create(
+            journey=other_journey,
+            sequence=1,
+            scheduled_at=now - timedelta(minutes=15),
+            grace_deadline=now - timedelta(minutes=1),
+            status=SafetyCheckIn.STATUS_UNCONFIRMED,
+            auto_sos_event=event,
+        )
+
+        response = self.client.post('/Journeys/{}/Safe'.format(journey.pk))
+
+        self.assertEqual(response.status_code, 302)
+        event.refresh_from_db()
+        self.assertEqual(event.status, SOSEvent.STATUS_ACTIVE)
+
     @patch.dict(os.environ, {'PANIC_EMAIL_USER': 'sender@example.test', 'PANIC_EMAIL_PASS': 'secret'}, clear=False)
     @patch('smtplib.SMTP_SSL')
     def test_overdue_scheduler_notifies_once_without_creating_sos(self, mock_smtp):
@@ -178,6 +242,7 @@ class JourneyFeatureTestCase(TestCase):
             expected_arrival=timezone.now() - timedelta(minutes=5),
             status=Journey.STATUS_ACTIVE,
             guardian_enabled=True,
+            grace_period_minutes=5,
         )
         journey.guardian_contacts.add(self.contact)
 
@@ -185,13 +250,17 @@ class JourneyFeatureTestCase(TestCase):
         second = process_overdue_journeys()
 
         journey.refresh_from_db()
-        self.assertEqual(journey.status, Journey.STATUS_OVERDUE)
+        self.assertEqual(journey.status, Journey.STATUS_UNCONFIRMED)
         self.assertEqual(first['overdue_journeys'], 1)
+        self.assertEqual(first['unconfirmed_journeys'], 1)
         self.assertEqual(first['sent_notifications'], 1)
         self.assertEqual(second['overdue_journeys'], 0)
         self.assertEqual(mock_smtp.call_count, 1)
-        self.assertEqual(JourneyCheckInAlert.objects.count(), 1)
-        self.assertEqual(JourneyCheckInDelivery.objects.get().status, JourneyCheckInDelivery.STATUS_SENT)
+        self.assertEqual(SafetyCheckIn.objects.count(), 1)
+        self.assertEqual(
+            SafetyCheckInAttempt.objects.get(kind=SafetyCheckInAttempt.KIND_GUARDIAN_EMAIL).status,
+            SafetyCheckInAttempt.STATUS_ACCEPTED,
+        )
         self.assertFalse(SOSEvent.objects.exists())
 
     @patch.dict(os.environ, {'PANIC_EMAIL_USER': '', 'PANIC_EMAIL_PASS': ''}, clear=False)
@@ -210,6 +279,7 @@ class JourneyFeatureTestCase(TestCase):
             expected_arrival=timezone.now() - timedelta(minutes=5),
             status=Journey.STATUS_ACTIVE,
             guardian_enabled=True,
+            grace_period_minutes=5,
         )
         journey.guardian_contacts.add(self.contact)
 
@@ -218,8 +288,11 @@ class JourneyFeatureTestCase(TestCase):
 
         self.assertEqual(first_result['failed_notifications'], 1)
         self.assertEqual(second_result['failed_notifications'], 0)
-        self.assertEqual(JourneyCheckInDelivery.objects.get().status, JourneyCheckInDelivery.STATUS_FAILED)
-        self.assertEqual(JourneyCheckInAlert.objects.get().status, JourneyCheckInAlert.STATUS_FAILED)
+        self.assertEqual(first_result['unconfirmed_journeys'], 1)
+        self.assertEqual(
+            SafetyCheckInAttempt.objects.get(kind=SafetyCheckInAttempt.KIND_GUARDIAN_EMAIL).status,
+            SafetyCheckInAttempt.STATUS_FAILED,
+        )
 
     def test_scheduler_does_not_process_journeys_without_guardian_opt_in(self):
         Journey.objects.create(
@@ -238,12 +311,17 @@ class JourneyFeatureTestCase(TestCase):
             guardian_enabled=False,
         )
         result = process_overdue_journeys()
-        self.assertEqual(result['overdue_journeys'], 0)
+        self.assertEqual(result['overdue_journeys'], 1)
+        self.assertEqual(result['unconfirmed_journeys'], 1)
         self.assertFalse(JourneyCheckInAlert.objects.exists())
+        self.assertFalse(SafetyCheckInAttempt.objects.filter(
+            kind=SafetyCheckInAttempt.KIND_GUARDIAN_EMAIL,
+        ).exists())
 
 
 class CommunityReportTestCase(TestCase):
     def setUp(self):
+        isolate_register_test_database(self)
         ensure_register_table()
         self.client = Client()
         session = self.client.session
@@ -251,8 +329,32 @@ class CommunityReportTestCase(TestCase):
         session['is_logged_in'] = True
         session.save()
 
+    def test_shared_navigation_exposes_feature_links_and_authenticated_account_menu(self):
+        response = self.client.get('/CommunityReports')
+
+        self.assertEqual(response.status_code, 200)
+        navigation = response.content.decode().split('<main class="site-main">', 1)[0]
+        self.assertIn('<header id="header" class="site-header">', navigation)
+        self.assertIn('<summary>More Features</summary>', navigation)
+        self.assertIn('>reporter</summary>', navigation)
+        for label, path in (
+            ('Community Reports', '/CommunityReports'),
+            ('Safety Timer', '/SafetyTimer'),
+            ('My Journeys', '/Journeys'),
+            ('Train Neural Network', '/TrainML'),
+            ('Emergency Contacts', '/EmergencyContacts'),
+            ('Logout', '/Logout'),
+        ):
+            self.assertIn('href="{}">{}</a>'.format(path, label), navigation)
+        for path in ('/Route', '/CrimePredict', '/Panic', '/Heatmap'):
+            self.assertIn('href="{}"'.format(path), navigation)
+        self.assertNotIn('href="/Dashboard"', navigation)
+        self.assertNotIn('href="/UserLogin.html"', navigation)
+        self.assertNotIn('href="/Register.html"', navigation)
+
     def valid_report(self, **overrides):
         data = {
+            'submission_key': str(uuid.uuid4()),
             'category': CommunityReport.CATEGORY_LIGHTING,
             'description': 'A user-reported concern near a public location.',
             'incident_at': (timezone.now() - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M'),
@@ -270,7 +372,8 @@ class CommunityReportTestCase(TestCase):
         self.assertEqual(report.status, CommunityReport.STATUS_SUBMITTED)
         self.assertAlmostEqual(report.approximate_latitude, 40.71)
         self.assertAlmostEqual(report.approximate_longitude, -74.01)
-        self.assertNotContains(self.client.get('/CommunityReports'), report.description)
+        other_client = Client()
+        self.assertNotContains(other_client.get('/CommunityReports'), report.description)
         map_data = self.client.get('/CommunityReports/MapData').json()
         self.assertEqual(map_data['reports'], [])
 
@@ -286,10 +389,128 @@ class CommunityReportTestCase(TestCase):
         )
         response = self.client.get('/CommunityReports')
         self.assertContains(response, report.description)
+        self.assertContains(response, 'Approximate area: 10.12, 20.46')
+        self.assertContains(response, 'Submitted:')
         self.assertNotContains(response, report.reporter)
         payload = self.client.get('/CommunityReports/MapData').json()
         self.assertEqual(payload['reports'][0]['id'], report.pk)
         self.assertNotIn('reporter', payload['reports'][0])
+        self.assertIn('submitted_at', payload['reports'][0])
+
+    def test_submitter_can_see_private_submission_status_only_on_their_account(self):
+        report = CommunityReport.objects.create(
+            reporter='reporter',
+            category=CommunityReport.CATEGORY_OTHER,
+            description='Private pending report details.',
+            approximate_latitude=1,
+            approximate_longitude=1,
+            incident_at=timezone.now() - timedelta(hours=1),
+            status=CommunityReport.STATUS_UNDER_REVIEW,
+        )
+
+        response = self.client.get('/CommunityReports')
+        self.assertContains(response, report.description)
+        self.assertContains(response, 'Under review')
+
+        other_client = Client()
+        other_session = other_client.session
+        other_session['username'] = 'another-reporter'
+        other_session['is_logged_in'] = True
+        other_session.save()
+        self.assertNotContains(other_client.get('/CommunityReports'), report.description)
+
+    def test_community_feed_filters_and_paginates_real_approved_reports(self):
+        incident_at = timezone.make_aware(datetime(2020, 1, 15, 12, 0))
+        for index in range(11):
+            CommunityReport.objects.create(
+                reporter='reporter',
+                category=CommunityReport.CATEGORY_HARASSMENT,
+                description='Approved report {}'.format(index),
+                approximate_latitude=1,
+                approximate_longitude=1,
+                incident_at=incident_at + timedelta(minutes=index),
+                status=CommunityReport.STATUS_APPROVED,
+            )
+        CommunityReport.objects.create(
+            reporter='reporter',
+            category=CommunityReport.CATEGORY_OTHER,
+            description='Different category',
+            approximate_latitude=1,
+            approximate_longitude=1,
+            incident_at=incident_at,
+            status=CommunityReport.STATUS_APPROVED,
+        )
+
+        response = self.client.get('/CommunityReports', {
+            'category': CommunityReport.CATEGORY_HARASSMENT,
+            'date_from': '2020-01-15',
+            'date_to': '2020-01-15',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['reports_page'].paginator.count, 11)
+        self.assertEqual(len(response.context['reports']), 10)
+        self.assertContains(response, 'Page 1 of 2')
+        self.assertContains(response, 'Next')
+        map_reports = self.client.get('/CommunityReports/MapData', {
+            'category': CommunityReport.CATEGORY_HARASSMENT,
+            'date_from': '2020-01-15',
+            'date_to': '2020-01-15',
+        }).json()['reports']
+        self.assertEqual(len(map_reports), 11)
+
+        second_page = self.client.get('/CommunityReports', {
+            'category': CommunityReport.CATEGORY_HARASSMENT,
+            'date_from': '2020-01-15',
+            'date_to': '2020-01-15',
+            'page': '2',
+        })
+        self.assertEqual(len(second_page.context['reports']), 1)
+        self.assertContains(second_page, 'Page 2 of 2')
+
+    def test_invalid_community_feed_filters_do_not_show_unfiltered_map_data(self):
+        report = CommunityReport.objects.create(
+            reporter='reporter',
+            category=CommunityReport.CATEGORY_OTHER,
+            description='Approved report.',
+            approximate_latitude=1,
+            approximate_longitude=1,
+            incident_at=timezone.now() - timedelta(hours=1),
+            status=CommunityReport.STATUS_APPROVED,
+        )
+
+        response = self.client.get('/CommunityReports', {'category': 'invalid'})
+        self.assertEqual(response.context['reports_page'].paginator.count, 0)
+        self.assertContains(response, 'Choose a valid report category.')
+        map_response = self.client.get('/CommunityReports/MapData', {'category': 'invalid'})
+        self.assertEqual(map_response.status_code, 400)
+        self.assertEqual(map_response.json()['reports'], [])
+        self.assertEqual(CommunityReport.objects.filter(pk=report.pk).count(), 1)
+
+    def test_repeated_submission_key_creates_only_one_report(self):
+        form_response = self.client.get('/CommunityReports')
+        submission_key = form_response.context['submission_key']
+        payload = self.valid_report(submission_key=str(submission_key))
+
+        first_response = self.client.post('/CommunityReports/Submit', payload)
+        repeated_response = self.client.post('/CommunityReports/Submit', payload, follow=True)
+
+        self.assertEqual(first_response.status_code, 302)
+        self.assertEqual(CommunityReport.objects.count(), 1)
+        self.assertContains(repeated_response, 'This report was already received')
+
+    def test_database_failure_does_not_confirm_or_create_a_report(self):
+        payload = self.valid_report()
+        with patch.object(CommunityReport, 'save', side_effect=DatabaseError('synthetic database failure')):
+            response = self.client.post('/CommunityReports/Submit', payload, follow=True)
+
+        self.assertContains(response, 'We could not save your report.')
+        self.assertFalse(CommunityReport.objects.exists())
+
+    def test_report_submission_requires_a_valid_session(self):
+        response = Client().post('/CommunityReports/Submit', self.valid_report(submission_key='invalid'))
+
+        self.assertRedirects(response, '/UserLogin.html')
+        self.assertFalse(CommunityReport.objects.exists())
 
     def test_report_coordinates_and_incident_time_are_validated(self):
         response = self.client.post('/CommunityReports/Submit', self.valid_report(approximate_latitude='100'))

@@ -108,7 +108,7 @@
       setSavedLocation(result.latitude, result.longitude, result.updated_at);
       setState('Sharing');
     }).catch(function () {
-      setState('Update failed');
+      setState('Location update failed; check your connection');
     }).finally(function () {
       requestPending = false;
     });
@@ -116,11 +116,13 @@
 
   function handlePositionError(error) {
     if (error.code === error.PERMISSION_DENIED) {
-      setState('Permission denied');
+      setState('Location permission denied');
     } else if (error.code === error.POSITION_UNAVAILABLE) {
       setState('Location unavailable');
+    } else if (error.code === error.TIMEOUT) {
+      setState('Location request timed out');
     } else {
-      setState('Update failed');
+      setState('Location update failed');
     }
   }
 

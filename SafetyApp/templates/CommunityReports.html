@@ -1,14 +1,10 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Community Safety Reports</title>
-  <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+{% block title %}Community Safety Reports{% endblock %}
+{% block page_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <style>
-    .reports-wrap { max-width: 980px; margin: 24px auto; padding: 16px; }
+    .reports-wrap { width: 100%; max-width: 1100px; margin: 24px auto; padding: 16px; box-sizing: border-box; }
     .report-card, .report-form { margin: 16px 0; padding: 16px; border: 1px solid #dfd3d3; border-radius: 9px; background: #fff; }
     .report-form label { display: block; margin: 12px 0; font-weight: bold; }
     .report-form input[type="text"], .report-form input[type="datetime-local"], .report-form textarea, .report-form select { display: block; box-sizing: border-box; width: 100%; margin-top: 5px; padding: 10px; }
@@ -20,24 +16,17 @@
     .flag-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
     .flag-form select, .flag-form button, .report-form button { min-height: 42px; padding: 8px 12px; }
     .status-badge { display: inline-block; padding: 5px 8px; border-radius: 5px; background: #eef4ff; font-weight: bold; }
+    .report-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 12px 0; }
+    .report-filters label { display: grid; gap: 5px; }
+    .report-pagination { display: flex; justify-content: space-between; gap: 12px; margin: 16px 0; }
+    .report-pagination a, .report-pagination span { padding: 8px 12px; }
     @media (max-width: 640px) { .reports-wrap { padding: 10px; } #reportLocationMap { height: 260px; } #approvedReportsMap { height: 320px; } }
+
   </style>
-</head>
-<body>
-  <div id="header">
-    <div id="logo"><h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1></div>
-    <div id="menu">
-      <ul>
-        <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
-        <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
-        <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
-        <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
-        <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
-        <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
-      </ul>
-    </div>
-  </div>
-  <main class="reports-wrap">
+{% endblock %}
+{% block body_class %}{% endblock %}
+{% block content %}
+<div class="reports-wrap">
     <h1>Community Safety Reports</h1>
     <div class="notice">
       Reports are user-submitted allegations, not verified facts. Only moderator-approved reports appear publicly.
@@ -48,9 +37,10 @@
 
     <section class="report-form">
       <h2>Submit a report for review</h2>
-      {% if request.session.is_logged_in %}
+      {% if is_reporter %}
       <form method="post" action="{% url 'CommunityReportSubmit' %}" enctype="multipart/form-data">
         {% csrf_token %}
+        <input type="hidden" name="submission_key" value="{{ submission_key }}" />
         <label>Category
           <select name="category" required>
             {% for value, label in categories %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
@@ -77,25 +67,67 @@
           <input type="file" name="evidence" accept=".jpg,.jpeg,.png,image/jpeg,image/png" />
         </label>
         <p>Evidence is kept private and can only be downloaded by authorized Django staff moderators.</p>
-        <button type="submit">Submit for moderation</button>
+        <button id="communityReportSubmitButton" type="submit">Submit for moderation</button>
       </form>
       {% else %}
       <p><a href="{% url 'UserLogin' %}">Sign in</a> with your app account to submit or flag a report.</p>
       {% endif %}
     </section>
 
+    {% if is_reporter %}
+    <section>
+      <h2>Your submissions</h2>
+      <p>Only you can see reports that are not publicly approved. Moderator status does not mean an independent verification occurred.</p>
+      {% for report in my_reports %}
+      <article class="report-card">
+        <span class="status-badge">{{ report.get_status_display }}</span>
+        <h3>{{ report.get_category_display }}</h3>
+        <p>{{ report.description|linebreaksbr }}</p>
+        <p>Incident: {{ report.incident_at|date:"Y-m-d H:i T" }} · Submitted: {{ report.created_at|date:"Y-m-d H:i T" }}</p>
+      </article>
+      {% empty %}
+      <p>You have not submitted any reports.</p>
+      {% endfor %}
+      {% if my_reports_page and my_reports_page.paginator.num_pages > 1 %}
+      <nav class="report-pagination" aria-label="Your report pages">
+        {% if my_reports_page.has_previous %}<a href="{{ my_reports_previous_url }}">Newer submissions</a>{% else %}<span></span>{% endif %}
+        <span>Page {{ my_reports_page.number }} of {{ my_reports_page.paginator.num_pages }}</span>
+        {% if my_reports_page.has_next %}<a href="{{ my_reports_next_url }}">Older submissions</a>{% endif %}
+      </nav>
+      {% endif %}
+    </section>
+    {% endif %}
+
     <section>
       <h2>Approved community reports</h2>
-      <p>Locations are rounded to approximately 1 km before storage. The map contains only approved reports and no reporter identity or evidence.</p>
+      <p>Locations are rounded to approximately 1 km before storage. The map contains only approved reports matching the selected filters and no reporter identity or evidence.</p>
       <div id="approvedReportsMap" aria-label="Map of moderator-approved community reports"></div>
       <div id="approvedReportsMapStatus" role="status" aria-live="polite"></div>
+      <form class="report-filters" method="get" action="{% url 'CommunityReports' %}">
+        <label>Category
+          <select name="category">
+            <option value="">All categories</option>
+            {% for value, label in categories %}<option value="{{ value }}"{% if selected_category == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Incident from
+          <input type="date" name="date_from" value="{{ date_from }}" />
+        </label>
+        <label>Incident to
+          <input type="date" name="date_to" value="{{ date_to }}" />
+        </label>
+        <button type="submit">Filter reports</button>
+        <a href="{% url 'CommunityReports' %}">Clear filters</a>
+      </form>
+      {% if filter_error %}<p class="notice" role="alert">{{ filter_error }}</p>{% endif %}
       {% for report in reports %}
       <article class="report-card">
         <span class="status-badge">Moderator approved — not independently verified</span>
         <h3>{{ report.get_category_display }}</h3>
         <p>{{ report.description|linebreaksbr }}</p>
-        <p>Reported incident time: {{ report.incident_at|date:"Y-m-d H:i T" }}</p>
-        {% if request.session.is_logged_in %}
+        <p>Approximate area: {{ report.approximate_latitude|floatformat:2 }}, {{ report.approximate_longitude|floatformat:2 }}</p>
+        <p>Reported incident time: {{ report.incident_at|date:"Y-m-d H:i T" }} · Submitted: {{ report.created_at|date:"Y-m-d H:i T" }}</p>
+        {% if is_reporter %}
         <form class="flag-form" method="post" action="{% url 'CommunityReportFlag' report.pk %}">
           {% csrf_token %}
           <label>Flag this report
@@ -112,10 +144,21 @@
         {% endif %}
       </article>
       {% empty %}
+      {% if selected_category or date_from or date_to %}
+      <p>No approved reports match the selected filters.</p>
+      {% else %}
       <p>No reports have been approved for public display.</p>
+      {% endif %}
       {% endfor %}
+      {% if reports_page.paginator.num_pages > 1 %}
+      <nav class="report-pagination" aria-label="Community report pages">
+        {% if reports_page.has_previous %}<a href="{{ previous_page_url }}">Previous</a>{% else %}<span></span>{% endif %}
+        <span>Page {{ reports_page.number }} of {{ reports_page.paginator.num_pages }}</span>
+        {% if reports_page.has_next %}<a href="{{ next_page_url }}">Next</a>{% endif %}
+      </nav>
+      {% endif %}
     </section>
-  </main>
+  </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script>
   (function() {
@@ -183,10 +226,12 @@
 
     if (approvedMapElement) {
       const map = createBaseMap(approvedMapElement, [20.5937, 78.9629], 5);
-      fetch("{% url 'CommunityReportMapData' %}", { headers: { 'Accept': 'application/json' } })
+      fetch("{% url 'CommunityReportMapData' %}" + window.location.search, { headers: { 'Accept': 'application/json' } })
         .then(function(response) {
-          if (!response.ok) throw new Error('Map data is unavailable.');
-          return response.json();
+          return response.json().then(function(payload) {
+            if (!response.ok) throw new Error(payload.error || 'Map data is unavailable.');
+            return payload;
+          });
         })
         .then(function(payload) {
           const points = [];
@@ -198,7 +243,7 @@
             const body = document.createElement('p');
             body.textContent = report.description;
             const when = document.createElement('small');
-            when.textContent = report.incident_at;
+            when.textContent = 'Incident: ' + report.incident_at + ' · Submitted: ' + report.submitted_at;
             popup.appendChild(title);
             popup.appendChild(body);
             popup.appendChild(when);
@@ -207,13 +252,23 @@
           });
           if (points.length) map.fitBounds(points, { padding: [24, 24], maxZoom: 13 });
           document.getElementById('approvedReportsMapStatus').textContent =
-            points.length ? points.length + ' approved report(s) shown.' : 'No approved reports to display.';
+            points.length ? points.length + ' approved report(s) shown.' : 'No approved reports match the current filters.';
         })
         .catch(function(error) {
           document.getElementById('approvedReportsMapStatus').textContent = error.message;
         });
     }
+
+    const submissionForm = document.querySelector('.report-form form');
+    if (submissionForm) {
+      submissionForm.addEventListener('submit', function() {
+        const submitButton = document.getElementById('communityReportSubmitButton');
+        if (submitButton) {
+          submitButton.disabled = true;
+          submitButton.textContent = 'Submitting…';
+        }
+      });
+    }
   })();
   </script>
-</body>
-</html>
+{% endblock %}

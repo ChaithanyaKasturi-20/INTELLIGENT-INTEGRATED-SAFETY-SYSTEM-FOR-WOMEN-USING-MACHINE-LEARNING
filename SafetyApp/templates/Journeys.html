@@ -1,12 +1,8 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>My Journeys</title>
-  <link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
-  <style>
+{% block title %}My Journeys{% endblock %}
+{% block page_head %}
+<style>
     .journeys-wrap { max-width: 900px; margin: 24px auto; padding: 16px; }
     .journey-card { background: #fff; border: 1px solid #dfd3d3; border-radius: 9px; margin: 16px 0; padding: 16px; }
     .journey-card h2 { margin: 0 0 10px; color: #8c0209; }
@@ -17,26 +13,15 @@
     .journey-actions button, .journey-actions select { min-height: 42px; padding: 8px 12px; }
     .journey-timeline { margin-top: 12px; padding-left: 22px; }
     .journey-message { padding: 10px; margin: 10px 0; background: #fff5f5; border-radius: 5px; }
+    .checkin-alert { margin-top: 12px; padding: 12px; background: #fff8e8; border-left: 4px solid #a15b00; }
     @media (max-width: 640px) { .journey-meta { grid-template-columns: 1fr; } .journeys-wrap { padding: 10px; } }
   </style>
-</head>
-<body>
-  <div id="header">
-    <div id="logo"><h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font></center></span></h1></div>
-    <div id="menu">
-      <ul>
-        <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
-        <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
-        <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
-        <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
-        <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
-        <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
-      </ul>
-    </div>
-  </div>
-  <main class="journeys-wrap">
+{% endblock %}
+{% block body_class %}{% endblock %}
+{% block content %}
+<div class="journeys-wrap">
     <h1>Plan Journey and Journey Guardian</h1>
-    <p>Journey status is stored with your account. Browser navigation uses your device while this page is open; it is not guaranteed to continue in the background.</p>
+    <p>Journey status and check-in schedules are stored with your account. Reminders are shown in this page when it is open; a closed page or offline device may not receive a live notification.</p>
     {% for message in messages %}<div class="journey-message">{{ message }}</div>{% endfor %}
     {% for journey in journeys %}
       <section class="journey-card">
@@ -51,19 +36,68 @@
           {% if journey.ended_at %}<div>Ended: {{ journey.ended_at|date:"Y-m-d H:i T" }}</div>{% endif %}
         </div>
         {% if journey.guardian_enabled %}
-          <p>Journey Guardian is enabled. An overdue check-in sends one email attempt to the selected active contacts. It does not activate SOS.</p>
-          <ul>{% for contact in journey.guardian_contacts.all %}<li>{{ contact.name }} — {{ contact.email }}</li>{% endfor %}</ul>
+          <p>Selected contacts are notified after a check-in remains unconfirmed through its grace period. A missed response is not proof of an emergency.</p>
+          <ul>{% for contact in journey.guardian_contacts.all %}
+            <li>{{ contact.name }} — {{ contact.email }}
+              {% if contact.is_active and contact.email_consent and contact.email_verified_at %}(verified and consented){% else %}(not eligible: active email consent and verification required){% endif %}
+            </li>
+          {% endfor %}</ul>
         {% else %}
           <p>Journey Guardian notifications are disabled for this journey.</p>
         {% endif %}
-        {% if journey.status == "OVERDUE" %}
-          <p role="alert"><strong>Check-in overdue.</strong> No SOS was automatically activated. Confirm you are safe, extend the deadline, or end the journey.</p>
+        {% if journey.current_checkin %}
+          <div class="checkin-alert" role="status">
+            <strong>Check-in {{ journey.current_checkin.get_status_display }}.</strong>
+            Due {{ journey.current_checkin.scheduled_at|date:"Y-m-d H:i T" }}; grace ends {{ journey.current_checkin.grace_deadline|date:"Y-m-d H:i T" }}.
+            {% if journey.current_checkin.status == "DUE" %}
+              Please confirm you are safe, extend the journey, or end it. Missing a response or GPS does not establish an emergency.
+            {% endif %}
+            <p>Reminder records: {{ journey.current_checkin.reminder_count }}.
+              {% if journey.device_heartbeat_stale %}Foreground browser heartbeat is stale or unavailable; the page may be closed or the device offline.{% else %}Last foreground browser heartbeat: {{ journey.last_device_seen_at|timesince }} ago.{% endif %}
+              GPS availability is tracked separately; neither condition proves an emergency.
+            </p>
+            {% if journey.location_status == "AVAILABLE" and journey.last_known_latitude != None %}
+              <p>Opted-in location: {{ journey.last_known_latitude }}, {{ journey.last_known_longitude }}; updated {{ journey.last_location_updated_at|date:"Y-m-d H:i T" }}; accuracy {% if journey.last_known_accuracy_meters != None %}{{ journey.last_known_accuracy_meters }} m{% else %}unavailable{% endif %}.</p>
+            {% elif journey.location_status == "UNAVAILABLE" %}
+              <p>GPS location unavailable; this is separate from the last browser heartbeat and is not proof of an emergency.</p>
+            {% elif journey.location_status == "PENDING" %}
+              <p>Location sharing is enabled; waiting for a foreground GPS update.</p>
+            {% else %}
+              <p>Location is not shared with contacts.</p>
+            {% endif %}
+          </div>
+        {% endif %}
+        {% if journey.status == "UNCONFIRMED" %}
+          <p role="alert"><strong>Check-in unconfirmed.</strong> This status is a lack of confirmation, not evidence that an emergency occurred.</p>
+        {% endif %}
+        {% if journey.status == "PLANNED" %}
+          <form method="post" action="{% url 'JourneyPolicy' journey.pk %}" class="journey-policy">
+            {% csrf_token %}
+            <h3>Journey check-in policy</h3>
+            <label>Check in every
+              <select name="checkin_interval_minutes">
+                <option value="5" {% if journey.checkin_interval_minutes == 5 %}selected{% endif %}>5 minutes</option>
+                <option value="10" {% if journey.checkin_interval_minutes == 10 %}selected{% endif %}>10 minutes</option>
+                <option value="15" {% if journey.checkin_interval_minutes == 15 %}selected{% endif %}>15 minutes</option>
+              </select>
+            </label>
+            <label>Grace period
+              <select name="grace_period_minutes">
+                <option value="5" {% if journey.grace_period_minutes == 5 %}selected{% endif %}>5 minutes</option>
+                <option value="10" {% if journey.grace_period_minutes == 10 %}selected{% endif %}>10 minutes</option>
+                <option value="15" {% if journey.grace_period_minutes == 15 %}selected{% endif %}>15 minutes</option>
+              </select>
+            </label>
+            <p><label><input type="checkbox" name="auto_sos_on_unconfirmed" value="true" {% if journey.auto_sos_on_unconfirmed %}checked{% endif %} /> Explicitly opt in to existing SOS escalation after the grace period plus 15 minutes</label></p>
+            <p><label><input type="checkbox" name="share_location_with_contacts" value="true" {% if journey.share_location_with_contacts %}checked{% endif %} /> Explicitly share foreground GPS, timestamp, and accuracy with selected contacts</label></p>
+            <button type="submit">Save check-in policy</button>
+          </form>
         {% endif %}
         <div class="journey-actions">
           {% if journey.status == "PLANNED" or journey.status == "ACTIVE" %}
             <a href="{% url 'Route' %}?journey_id={{ journey.pk }}">Open route preview / navigation</a>
           {% endif %}
-          {% if journey.status == "ACTIVE" or journey.status == "OVERDUE" %}
+          {% if journey.status == "ACTIVE" or journey.status == "OVERDUE" or journey.status == "UNCONFIRMED" %}
             <form method="post" action="{% url 'JourneySafe' journey.pk %}">{% csrf_token %}
               <button type="submit">I am safe — check in</button>
             </form>
@@ -78,7 +112,7 @@
               <button type="submit">Extend check-in deadline</button>
             </form>
           {% endif %}
-          {% if journey.status == "PLANNED" or journey.status == "ACTIVE" or journey.status == "OVERDUE" %}
+          {% if journey.status == "PLANNED" or journey.status == "ACTIVE" or journey.status == "OVERDUE" or journey.status == "UNCONFIRMED" %}
             <form method="post" action="{% url 'JourneyEnd' journey.pk %}">{% csrf_token %}
               <button type="submit">{% if journey.status == "PLANNED" %}Cancel plan{% else %}End journey{% endif %}</button>
             </form>
@@ -96,6 +130,14 @@
           <p>Overdue notice for {{ alert.deadline_at|date:"Y-m-d H:i T" }}: {{ alert.get_status_display }}</p>
           <ul>{% for delivery in alert.deliveries.all %}<li>{{ delivery.recipient_email }} — {{ delivery.get_status_display }}{% if delivery.error_message %} ({{ delivery.error_message }}){% endif %}</li>{% endfor %}</ul>
         {% endfor %}
+        {% for checkin in journey.safety_checkins.all %}
+          {% if checkin.status == "UNCONFIRMED" %}
+            <h3>Check-in notification attempts</h3>
+            <ul>{% for attempt in checkin.attempts.all %}
+              <li>{{ attempt.get_kind_display }} — {{ attempt.recipient_email|default:"in-app reminder" }}: {{ attempt.get_status_display }}{% if attempt.error_message %} ({{ attempt.error_message }}){% endif %}</li>
+            {% empty %}<li>No contact notification attempt was required or eligible.</li>{% endfor %}</ul>
+          {% endif %}
+        {% endfor %}
       </section>
     {% empty %}
       <section class="journey-card">
@@ -103,6 +145,54 @@
       </section>
     {% endfor %}
     <p><a href="{% url 'SafetyTimer' %}">Open the existing Safety Timer</a></p>
-  </main>
-</body>
-</html>
+  </div>
+  <script>
+    (function() {
+      const csrfInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+      if (!csrfInput) return;
+      const csrfToken = csrfInput.value;
+      const journeyData = [
+        {% for journey in journeys %}
+          {% if journey.status == "ACTIVE" or journey.status == "OVERDUE" or journey.status == "UNCONFIRMED" %}
+            {id: {{ journey.pk }}, consent: {{ journey.share_location_with_contacts|yesno:"true,false" }}},
+          {% endif %}
+        {% endfor %}
+      ];
+      if (!journeyData.length) return;
+
+      function send(journey, status, position) {
+        const payload = {owner_type: 'journey', owner_id: journey.id, location_status: status};
+        if (position) {
+          payload.latitude = position.coords.latitude;
+          payload.longitude = position.coords.longitude;
+          payload.accuracy_meters = position.coords.accuracy;
+        }
+        fetch("{% url 'SafetyCheckInLocation' %}", {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+          body: JSON.stringify(payload),
+          credentials: 'same-origin'
+        }).catch(function() {});
+      }
+
+      function heartbeat(journey) {
+        if (!journey.consent) {
+          send(journey, 'NOT_SHARED');
+        } else if (!navigator.geolocation) {
+          send(journey, 'UNAVAILABLE');
+        } else {
+          navigator.geolocation.getCurrentPosition(
+            function(position) { send(journey, 'AVAILABLE', position); },
+            function() { send(journey, 'UNAVAILABLE'); },
+            {enableHighAccuracy: true, maximumAge: 30000, timeout: 10000}
+          );
+        }
+      }
+      journeyData.forEach(heartbeat);
+      window.setInterval(function() {
+        journeyData.forEach(heartbeat);
+        window.location.reload();
+      }, 60000);
+    })();
+  </script>
+{% endblock %}

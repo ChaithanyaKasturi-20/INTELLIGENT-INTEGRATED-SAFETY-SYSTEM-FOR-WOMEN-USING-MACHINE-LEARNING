@@ -143,7 +143,9 @@ python manage.py migrate
 
 No `makemigrations` step is needed for a normal first run; apply the migrations already in `SafetyApp/migrations/`. The application creates its separate `register` table on demand when registration/login code accesses it.
 
-The `0005_auto_20261011_0843.py` migration adds journey plans/activity/check-in audit records and moderated community reports/flags. The `0006_auto_20261011_1154.py` migration adds SOS live-location sharing tokens and the latest-location timestamp. These migrations do not remove existing tables or records. Keep an existing SQLite database in place and apply migrations normally.
+The checked-in SafetyApp migration chain runs from `0001_initial` through `0019_safetycheckin_delivery_channel`. It includes changes to SOS notifications, event uniqueness, contact consent and verification, personal safety profiles, journey/timer check-ins, and reminder delivery channels. The migration files and `SafetyApp/migration_support_0011.py` are required application deployment files; keep the complete chain and helper together.
+
+Migration state belongs to a specific database. The local development database was observed with SafetyApp migrations `0001`–`0019` applied on 2026-11-10; that observation says nothing about another developer's database or production. Before deploying, inspect the target environment with `python manage.py showmigrations SafetyApp` using that environment's configured database, and review the pending migration files and dependencies. This project uses Django 2.1.7, whose `migrate` command does not support `--plan`. Resolve any migration or existing-data errors before applying changes. Back up or snapshot the target database first, then apply approved migrations with `python manage.py migrate` as a deliberate deployment step. Do not delete, reset, or flush an existing database to resolve migration problems.
 
 `db.sqlite3` is ignored by Git and is not supplied as a portable developer database. Migration creates the Django-managed tables; it does not create a demo account. If a local `db.sqlite3` already exists, it may contain user data—keep it and do not delete or reset it as routine setup.
 
@@ -188,24 +190,34 @@ Routes below are defined in `SafetyApp/urls.py`; some features redirect to the l
 
 Journey and report POST actions are listed in `SafetyApp/urls.py`. Community report moderation and private evidence downloads are available only through Django staff/admin accounts (`/admin/`).
 
-### Run Journey Guardian's overdue-check scheduler
+### Safety Timer, Journey Guardian, and SOS scheduler
 
-The management command processes overdue, opt-in journeys and records notification attempts:
-
-```powershell
-python manage.py process_overdue_journeys
-```
-
-It does **not** run automatically. For local development, run the command periodically from a second PowerShell window (for example, every minute):
+Schedule **only** the unified one-shot command below. It processes due Safety
+Timer and Journey check-ins, their consent-gated guardian notifications,
+interrupted SOS notification attempts, and due SOS escalation work:
 
 ```powershell
-while ($true) {
-    python manage.py process_overdue_journeys
-    Start-Sleep -Seconds 60
-}
+.\.venv39\Scripts\python.exe manage.py process_safety_work
 ```
 
-Stop the loop with **Ctrl+C**. For production, configure and monitor an OS/cloud scheduler to invoke the command once per minute using the same application release, environment variables, and database. Do not run overlapping scheduler instances. Email uses the existing `PANIC_EMAIL_USER` and `PANIC_EMAIL_PASS` SMTP configuration; missing configuration or send failures are recorded. One attempt per trusted contact is intentional: interrupted/ambiguous SMTP sends are not retried automatically to avoid duplicate notifications. A scheduled command, SMTP acceptance, or this prototype cannot guarantee that a contact receives or responds to an alert.
+For local development, run it manually when testing or use Windows Task
+Scheduler to invoke it once per minute. Configure the task's program as the
+repository's `.venv39\Scripts\python.exe`, arguments as
+`manage.py process_safety_work`, and **Start in** as the repository root. Set
+the task to not start a new instance if one is already running. Review the
+first run's exit code and output.
+
+For production, use one monitored durable scheduler to invoke the same command
+once per minute against the deployed release, environment, and database.
+Prevent overlapping runs, capture logs and non-zero exits, and alert on missed
+runs. Do not also schedule `process_overdue_journeys`,
+`process_expired_safety_timers`, or `process_sos_escalations`; those are
+specialized/legacy entry points and would duplicate processing. Delayed jobs
+are recovered on a subsequent unified run, but scheduler execution and
+provider acceptance do not guarantee that a recipient receives or responds to
+an alert. See
+[`SafetyApp/management/commands/README.md`](SafetyApp/management/commands/README.md)
+for the detailed Windows and production procedure and safety limitations.
 
 Community evidence is stored under the ignored `private_uploads/` directory and is not mapped to a public media URL. Authorized Django staff can download evidence from the moderation screen. Keep that directory private in any deployment and do not configure a web server to serve it directly.
 

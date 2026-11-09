@@ -1,38 +1,232 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Intelligent Integrated Safety System for Women Using Machine Learning</title>
-  <link href="{% static 'default.css' %}?v=20261011-4" rel="stylesheet" type="text/css" media="screen" />
-</head>
-<body class="public-page" style="background-image: url('{% static 'images/back.jpg' %}');">
-  <header id="header" class="public-header">
-    <div id="logo">
-      <h1>Intelligent Integrated Safety System for Women Using Machine Learning</h1>
+{% block title %}Home | Intelligent Integrated Safety System{% endblock %}
+{% block page_head %}
+{% if dashboard_user %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+{% endif %}
+{% endblock %}
+{% block body_class %}home-dashboard{% endblock %}
+{% block content %}
+<section class="home-hero" id="account-overview">
+  <div class="home-hero-copy">
+    <p class="home-eyebrow">Stay aware <span aria-hidden="true">•</span> Stay safe <span aria-hidden="true">•</span> Stay strong</p>
+    {% if dashboard_user %}
+      <h2>Welcome back, <span>{{ dashboard_user }}</span></h2>
+      <p>Your safety tools and trusted contacts are ready when you need them.</p>
+    {% else %}
+      <h2>Your safety, all in one place</h2>
+      <p>Plan a route, explore safety information, and connect with the tools that help you stay prepared.</p>
+    {% endif %}
+    <div class="home-hero-actions">
+      {% if dashboard_user %}
+      <a class="dashboard-action dashboard-action-primary" href="{% url 'Route' %}">Plan a Safe Route</a>
+      <a class="dashboard-action dashboard-action-secondary" href="{% url 'Panic' %}">Activate SOS</a>
+      {% else %}
+      <a class="dashboard-action dashboard-action-primary" href="{% url 'UserLogin' %}">Login</a>
+      <a class="dashboard-action dashboard-action-secondary" href="{% url 'Register' %}">Register</a>
+      {% endif %}
     </div>
-    <nav id="menu" aria-label="Main navigation">
-      <ul id="main">
-        <li class="current_page_item"><a href="{% url 'index' %}" aria-current="page">Home</a></li>
-        <li><a href="{% url 'UserLogin' %}">User Login Here</a></li>
-        <li><a href="{% url 'Register' %}">New User Signup Here</a></li>
-      </ul>
-    </nav>
-  </header>
-
-  <div id="wrapper">
-    <main id="page">
-      <div id="content" class="public-content public-home-panel">
-        <div class="flower">
-          <img class="public-banner" src="{% static 'images/tra.jpg' %}" alt="" />
-        </div>
-        <section class="public-welcome">
-          <h2>Welcome</h2>
-          <p>Explore the women’s safety tools and information in this project.</p>
-        </section>
-      </div>
-    </main>
   </div>
-</body>
-</html>
+  <div class="home-hero-mark">
+    <img src="{% static 'images/womens-safety-hero.png' %}" alt="Woman protected by a shield with safety greenery" />
+  </div>
+</section>
+
+<section class="home-features" aria-labelledby="featureTitle">
+  <div class="dashboard-section-heading">
+    <div>
+      <p class="home-eyebrow">Your safety toolkit</p>
+      <h2 id="featureTitle">Quick access</h2>
+    </div>
+  </div>
+  <div class="home-feature-grid">
+    <a class="home-feature-card" href="{% if dashboard_user %}{% url 'Route' %}{% else %}{% url 'UserLogin' %}{% endif %}">
+      <span class="home-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 22s8-7.2 8-13a8 8 0 1 0-16 0c0 5.8 8 13 8 13Z"/><circle cx="12" cy="9" r="2.5"/></svg>
+      </span>
+      <h3>Route Routing</h3>
+      <p>Plan a route and explore nearby safety facilities.</p>
+      <span class="home-card-link">{% if dashboard_user %}Plan route{% else %}Login to plan{% endif %} <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="home-feature-card" href="{% url 'CrimePredict' %}">
+      <span class="home-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 19V11M10 19V5M16 19v-8M22 19V8"/></svg>
+      </span>
+      <h3>Crime Prediction</h3>
+      <p>Explore the available women’s safety insights.</p>
+      <span class="home-card-link">View insights <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="home-feature-card home-feature-card-emergency" href="{% if dashboard_user %}{% url 'Panic' %}{% else %}{% url 'UserLogin' %}{% endif %}">
+      <span class="home-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6ZM9 19a3 3 0 0 0 6 0"/></svg>
+      </span>
+      <h3>Panic / SOS</h3>
+      <p>Open the emergency alert controls and status.</p>
+      <span class="home-card-link">{% if dashboard_user %}Open SOS{% else %}Login for SOS{% endif %} <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="home-feature-card" href="{% url 'Heatmap' %}">
+      <span class="home-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"/></svg>
+      </span>
+      <h3>Heatmap</h3>
+      <p>View the safety data available on the map.</p>
+      <span class="home-card-link">Explore map <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="home-feature-card" href="{% if dashboard_user %}{% url 'SafetyTimer' %}{% else %}{% url 'UserLogin' %}{% endif %}">
+      <span class="home-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6M12 2v3"/></svg>
+      </span>
+      <h3>Safety Timer</h3>
+      <p>Start a timer for a journey or situation.</p>
+      <span class="home-card-link">{% if dashboard_user %}Open timer{% else %}Login to start{% endif %} <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="home-feature-card" href="{% url 'CommunityReports' %}">
+      <span class="home-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20v-1a6 6 0 0 1 12 0v1M15 15a5 5 0 0 1 6 5"/></svg>
+      </span>
+      <h3>Community Reports</h3>
+      <p>View or submit a community safety report.</p>
+      <span class="home-card-link">Open reports <span aria-hidden="true">→</span></span>
+    </a>
+  </div>
+</section>
+
+{% if dashboard_user %}
+<section class="home-personal-dashboard" aria-labelledby="snapshotTitle">
+  <div class="dashboard-section-heading">
+    <div>
+      <p class="home-eyebrow">Your account</p>
+      <h2 id="snapshotTitle">Safety overview</h2>
+    </div>
+  </div>
+  <div class="home-dashboard-columns">
+    <section class="home-dashboard-panel home-stats-panel" aria-label="Quick Stats">
+      <h3>Quick Stats</h3>
+      {% if has_active_sos %}<p class="home-sos-status">Active alert</p>{% else %}<p class="home-sos-status">No active alert</p>{% endif %}
+      <div class="home-stats-grid">
+        <article class="home-stat-card">
+          <span class="home-stat-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-7.2 8-13a8 8 0 1 0-16 0c0 5.8 8 13 8 13Z"/><circle cx="12" cy="9" r="2.5"/></svg>
+          </span>
+          <span class="home-stat-value" id="safePlacesCount">--</span>
+          <span class="home-stat-label">Safe Places Nearby</span>
+        </article>
+        <article class="home-stat-card">
+          <span class="home-stat-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-7.2 8-13a8 8 0 1 0-16 0c0 5.8 8 13 8 13Z"/><circle cx="12" cy="9" r="2.5"/></svg>
+          </span>
+          <span class="home-stat-value">{{ journey_count }}</span>
+          <span class="home-stat-label">Journeys Planned</span>
+        </article>
+        <article class="home-stat-card">
+          <span class="home-stat-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6M12 2v3"/></svg>
+          </span>
+          <span class="home-stat-value">{% if active_safety_timer %}1{% else %}0{% endif %}</span>
+          <span class="home-stat-label">Active Safety Timer</span>
+        </article>
+        <article class="home-stat-card">
+          <span class="home-stat-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20v-1a6 6 0 0 1 12 0v1M15 15a5 5 0 0 1 6 5"/></svg>
+          </span>
+          <span class="home-stat-value">{{ community_report_count }}</span>
+          <span class="home-stat-label">Community Reports</span>
+        </article>
+      </div>
+    </section>
+    <section class="home-dashboard-panel home-location-panel" aria-labelledby="locationTitle">
+      <h3 id="locationTitle">Your Current Location</h3>
+      <div class="home-location-map" id="dashboardLocationMap" aria-label="Your current location map"></div>
+      <div class="home-location-status" id="dashboardLocationStatus" role="status" aria-live="polite">Detecting your current location…</div>
+      <div class="home-location-accuracy" id="dashboardLocationAccuracy"></div>
+    </section>
+    <section class="home-dashboard-panel home-activity-card" aria-labelledby="activityTitle">
+      <div class="dashboard-section-heading">
+        <h3 id="activityTitle">Recent Activity</h3>
+        <a href="{% url 'Journeys' %}">View All</a>
+      </div>
+      {% if recent_activities %}
+        <ul class="home-activity-list">
+          {% for activity in recent_activities %}
+            <li>
+              <span class="home-activity-dot" aria-hidden="true"></span>
+              <span class="home-activity-copy">
+                <strong>{{ activity.title }}</strong>
+                {% if activity.status %}<span>{{ activity.status }}</span>{% endif %}
+              </span>
+              <time datetime="{{ activity.occurred_at|date:'c' }}">{{ activity.occurred_at|date:"M j · g:i A" }}</time>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="home-empty-state">Your recent safety activity will appear here when there are records to show.</p>
+      {% endif %}
+    </section>
+  </div>
+</section>
+{% endif %}
+
+{% if dashboard_user %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var statusElement = document.getElementById('dashboardLocationStatus');
+    var accuracyElement = document.getElementById('dashboardLocationAccuracy');
+    var safePlacesElement = document.getElementById('safePlacesCount');
+    var mapElement = document.getElementById('dashboardLocationMap');
+    if (!mapElement || !statusElement) return;
+    if (!window.L) {
+      statusElement.textContent = 'The map is currently unavailable.';
+      return;
+    }
+
+    var map = L.map(mapElement, { zoomControl: true, attributionControl: true }).setView([20, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19
+    }).addTo(map);
+
+    if (!navigator.geolocation) {
+      statusElement.textContent = 'Location access is not supported by this browser.';
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(function (position) {
+      var latitude = position.coords.latitude;
+      var longitude = position.coords.longitude;
+      var accuracy = position.coords.accuracy;
+      map.setView([latitude, longitude], 14);
+      L.circle([latitude, longitude], {
+        radius: accuracy,
+        color: '#8e1424',
+        fillColor: '#d9232e',
+        fillOpacity: .18,
+        weight: 1
+      }).addTo(map);
+      L.marker([latitude, longitude]).addTo(map);
+      statusElement.textContent = 'Location detected';
+      if (accuracyElement && typeof accuracy === 'number' && accuracy > 0) {
+        accuracyElement.textContent = 'Accuracy: approximately ' + Math.round(accuracy) + ' metres';
+      }
+
+      var radius = 1000;
+      var query = '[out:json][timeout:12];(nwr["amenity"~"^(police|hospital|pharmacy|fire_station|clinic)$"](around:' + radius + ',' + latitude + ',' + longitude + '););out tags;';
+      fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query))
+        .then(function (response) { return response.ok ? response.json() : Promise.reject(); })
+        .then(function (data) {
+          var count = data.elements ? data.elements.length : 0;
+          if (safePlacesElement) safePlacesElement.textContent = String(count);
+        })
+        .catch(function () {
+          if (safePlacesElement) safePlacesElement.textContent = '—';
+        });
+    }, function (error) {
+      statusElement.textContent = error.code === 1
+        ? 'Location access was denied. Allow location to show your position.'
+        : 'Current location is temporarily unavailable.';
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 });
+  });
+</script>
+{% endif %}
+{% endblock %}

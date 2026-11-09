@@ -1,90 +1,19 @@
-{% load static %}
-<html>
-<head>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</title>
-<meta name="keywords" content="" />
-<meta name="Premium Series" content="" />
-<link href="{% static 'default.css' %}" rel="stylesheet" type="text/css" media="screen" />
-<style>
-body {
-  background-image: url("{% static 'images/back.jpg' %}");
-}
-progress {
-  text-align: center;
-}
-progress:after {
-  content: attr(value)'%';
-}
-</style>
-</head>
-<body>
-<!-- start header -->
-<div id="header">
-	<div id="logo">
-		<h1><span><center><font size="5" color="white"><br/>INTELLIGENT INTEGRATED SAFETY SYSTEM FOR WOMEN USING MACHINE LEARNING</font>
-
-</center></span></h1>
-		
-	</div>
-	<div id="menu">
-		<ul>      
-     <li><a href="{% url 'TrainML' %}"><font size="3" color="white">Train Neural Network</font></a></li>
-	 <li><a href="{% url 'Route' %}"><font size="3" color="white">Route Routing</font></a></li>
-	 <li><a href="{% url 'CrimePredict' %}"><font size="3" color="white">Crime Predict on Women</font></a></li>
-	 <li><a href="{% url 'Panic' %}"><font size="3" color="white">Panic</font></a></li>
-	 <li><a href="{% url 'Heatmap' %}"><font size="3" color="white">Heatmap</font></a></li>
-	 <li><a href="{% url 'Logout' %}"><font size="3" color="white">Logout</font></a></li>
-   </ul>     
-		
-	</div>
-	
-</div>
-<div id="wrapper">
-	<!-- start page -->
-	<div id="page">
-		
-		<!-- start content -->
-		<div id="content">
-			<div class="flower"><img src="{% static 'images/tra.jpg' %}" alt="" width="800" height="200" /></center></div>
-			<br/><br/>
-
-			<center><font face="verdana" color="black">{{ data|safe }}</center></font><br/>
-			<div style="max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background: #fff7f7;">
-				<h3 style="margin: 0 0 12px; color: #8C0209;">Safety Timer</h3>
-				<p style="margin: 0 0 12px;">Quick access to the personal safety timer that automatically triggers the existing SOS flow if you do not confirm you are safe.</p>
-				<a href="{% url 'SafetyTimer' %}" style="display: inline-block; padding: 10px 18px; background: #8C0209; color: white; border-radius: 6px; font-weight: bold;">Open Safety Timer</a>
-				{% if safety_timer %}
-					<p style="margin-top: 12px; margin-bottom: 0; font-weight: bold; color: #333;">Current status: {{ safety_timer.status }}</p>
-				{% endif %}
-				<p style="margin-top: 12px; margin-bottom: 0; color: #555;">More safety tools: <a href="{% url 'Journeys' %}">My Journeys</a> | <a href="{% url 'CommunityReports' %}">Community Reports</a></p>
-			</div>
-		<img src="data:image/png;base64, {{ img }}" alt="" />
-	
-		<center>
-		
-			<table align="center">
-			<tr>
-			<h3>
-			</p></h3>
-			</table>
-			</center><br /><div class="post">
-				
-				<div class="entry">
-					
-				</div>
-			</div>
-		</div>
-		<!-- end content -->
-		<!-- start sidebars -->
-		
-		<!-- end sidebars -->
-		<div style="clear: both;">&nbsp;</div>
-	</div>
-	<!-- end page -->
-</div>
-</body>
-</html>
-
-
+{% extends "base.html" %}
+{% block title %}Crime Prediction Result | Intelligent Integrated Safety System{% endblock %}
+{% block body_class %}crime-result-page{% endblock %}
+{% block content %}
+<section class="crime-result-card" aria-labelledby="crimeResultTitle">
+  <p class="home-eyebrow">Crime prediction</p>
+  <h2 id="crimeResultTitle">Prediction result</h2>
+  {% if prediction_error %}
+    <p class="crime-result-message" role="alert">{{ prediction_error }}</p>
+  {% else %}
+    <p class="crime-result-message">
+      Predicted number of reported crimes against women in
+      <strong>{{ prediction_state }}</strong>:
+      <strong>{{ prediction_value }}</strong>
+    </p>
+  {% endif %}
+  <a class="dashboard-action dashboard-action-primary" href="{% url 'CrimePredict' %}">Run another prediction</a>
+</section>
+{% endblock %}
