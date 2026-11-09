@@ -2,10 +2,12 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.shortcuts import redirect, render
 from django.contrib import messages
+from django.contrib.auth.hashers import check_password, identify_hasher, make_password
+from django.utils.crypto import constant_time_compare
 from django.http import HttpResponse, JsonResponse
 from django.conf import settings
-from django.db import transaction
-from django.db.models import Q
+from django.db import IntegrityError, OperationalError, connection, transaction
+from django.db.models import F, Q
 from django.core.cache import cache
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
@@ -20,6 +22,7 @@ import secrets
 import sqlite3
 import logging
 import re
+import time
 import socket
 import urllib.parse
 import matplotlib.pyplot as plt
@@ -30,14 +33,23 @@ import smtplib
 from datetime import timedelta
 from django.utils import timezone
 
-from .models import EmergencyContact, SafetyTimer as SafetyTimerModel, SOSEvent, SOSEmailDelivery, SOSLiveLocationShare, normalize_emergency_email
+from .models import CommunityReport, EmergencyContact, Journey, JourneyActivity, PersonalSafetyProfile, SafetyCheckIn, SafetyCheckInAttempt, SafetyTimer as SafetyTimerModel, SOSEvent, SOSEmailDelivery, SOSLiveLocationShare, SOSNotificationAttempt, normalize_emergency_email
+from .heatmap_data import CRIME_CATEGORIES, build_state_heatmap_data
+from .sos_acknowledgement import record_web_acknowledgement
+from .sos_escalation import start_sos_escalation, stop_sos_escalation
+from .sos_notifications import get_eligible_contacts
+from .safety_checkins import (
+    cancel_owner_checkins,
+    confirm_owner_checkin,
+    process_safety_checkins,
+    schedule_checkin,
+)
 
 logger = logging.getLogger(__name__)
 
 FOLLOWED_MODE_SESSION_KEY = 'safety_timer_mode'
 FOLLOWED_MODE = 'FOLLOWED'
 
-global username, email
 dataset = pd.read_csv("Dataset/CrimesOnWomenData.csv")
 states = np.unique(dataset['State'])
 
@@ -63,8 +75,49 @@ def get_panic_email_config():
     return sender_email, sender_password
 
 
+class _ClosingSQLiteConnection(sqlite3.Connection):
+    def __exit__(self, exception_type, exception_value, traceback):
+        try:
+            return super(_ClosingSQLiteConnection, self).__exit__(
+                exception_type,
+                exception_value,
+                traceback,
+            )
+        finally:
+            self.close()
+
+
 def get_register_db_connection():
-    conn = sqlite3.connect(os.path.join(settings.BASE_DIR, 'db.sqlite3'))
+    database_name = connection.settings_dict.get('NAME') or ''
+    test_database_name = connection.settings_dict.get('TEST', {}).get('NAME')
+    is_test_database = (
+        database_name == ':memory:'
+        or database_name.startswith('file:memorydb_')
+        or os.path.basename(database_name).lower().startswith('test_')
+        or (test_database_name and database_name == test_database_name)
+    )
+    test_base_dir = getattr(settings, 'REGISTER_TEST_DB_DIR', None)
+    if test_base_dir or is_test_database:
+        if not test_base_dir:
+            raise RuntimeError(
+                'Tests using the register database must set '
+                'REGISTER_TEST_DB_DIR to a per-test temporary directory.'
+            )
+        register_database_path = os.path.join(
+            test_base_dir,
+            'register-test.sqlite3',
+        )
+        development_database_path = os.path.join(settings.BASE_DIR, 'db.sqlite3')
+        if os.path.normcase(os.path.realpath(register_database_path)) == os.path.normcase(
+            os.path.realpath(development_database_path)
+        ):
+            raise RuntimeError(
+                'Test register database cannot use the development database path.'
+            )
+    else:
+        register_database_path = os.path.join(settings.BASE_DIR, 'db.sqlite3')
+
+    conn = sqlite3.connect(register_database_path, factory=_ClosingSQLiteConnection)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -83,11 +136,144 @@ def ensure_register_table():
         conn.commit()
 
 
+def verify_and_upgrade_registered_password(username, raw_password, encoded_password):
+    try:
+        identify_hasher(encoded_password)
+        return check_password(raw_password, encoded_password)
+    except ValueError:
+        password_verified = constant_time_compare(encoded_password or '', raw_password or '')
+
+    if password_verified:
+        upgraded_hash = make_password(raw_password)
+        with get_register_db_connection() as connection:
+            connection.execute(
+                'UPDATE register SET password = ? WHERE username = ?',
+                (upgraded_hash, username),
+            )
+
+    return password_verified
+
+
 def require_logged_in_user(request):
-    current_user = request.session.get('username') or globals().get('username')
-    if not current_user:
+    if request.session.get('is_logged_in') is not True:
         return None, redirect('UserLogin')
-    return current_user, None
+
+    current_user = request.session.get('username')
+    if not isinstance(current_user, str) or not current_user.strip():
+        return None, redirect('UserLogin')
+    return current_user.strip(), None
+
+
+def add_private_no_store_headers(response):
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0, private'
+    response['Pragma'] = 'no-cache'
+    response['Expires'] = '0'
+    return response
+
+
+def get_registered_account(user):
+    ensure_register_table()
+    with get_register_db_connection() as connection:
+        row = connection.execute(
+            'SELECT username, contact_no, email, address FROM register WHERE username = ?',
+            (user,),
+        ).fetchone()
+    return {
+        'username': user,
+        'mobile_number': row['contact_no'] if row is not None else '',
+        'email': row['email'] if row is not None else '',
+        'address': row['address'] if row is not None else '',
+    }
+
+
+def MyAccount(request):
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
+        return redirect_response
+
+    profile, _ = PersonalSafetyProfile.objects.get_or_create(username=current_user)
+    account = get_registered_account(current_user)
+    form_errors = {}
+
+    if request.method == 'POST':
+        full_name = (request.POST.get('full_name', '') or '').strip()
+        date_of_birth_text = (request.POST.get('date_of_birth', '') or '').strip()
+        gender = (request.POST.get('gender', '') or '').strip()
+        email = (request.POST.get('email', '') or '').strip()
+        mobile_number = (request.POST.get('mobile_number', '') or '').strip()
+        address = (request.POST.get('address', '') or '').strip()
+
+        date_of_birth = None
+        if date_of_birth_text:
+            try:
+                date_of_birth = timezone.datetime.strptime(date_of_birth_text, '%Y-%m-%d').date()
+                if date_of_birth >= timezone.localdate():
+                    form_errors['date_of_birth'] = ['Date of birth must be in the past.']
+            except ValueError:
+                form_errors['date_of_birth'] = ['Enter a valid date of birth.']
+
+        if len(full_name) > 150:
+            form_errors['full_name'] = ['Full name must be 150 characters or fewer.']
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                form_errors['email'] = ['Enter a valid email address.']
+        else:
+            form_errors['email'] = ['Email address is required.']
+        if not re.fullmatch(r'^\+?[0-9\s()-]{8,20}$', mobile_number):
+            form_errors['mobile_number'] = ['Enter a valid mobile number.']
+        if len(address) > 500:
+            form_errors['address'] = ['Address must be 500 characters or fewer.']
+
+        medical_consent = request.POST.get('medical_consent') == 'on'
+        medical_fields = {
+            'blood_group': (request.POST.get('blood_group', '') or '').strip(),
+            'medical_conditions': (request.POST.get('medical_conditions', '') or '').strip(),
+            'allergies': (request.POST.get('allergies', '') or '').strip(),
+            'medications': (request.POST.get('medications', '') or '').strip(),
+            'medical_notes': (request.POST.get('medical_notes', '') or '').strip(),
+            'disability_information': (request.POST.get('disability_information', '') or '').strip(),
+        }
+        if medical_consent is False:
+            for field_name in list(medical_fields):
+                medical_fields[field_name] = ''
+
+        if not form_errors:
+            with transaction.atomic():
+                profile.full_name = full_name
+                profile.date_of_birth = date_of_birth
+                profile.gender = gender
+                profile.medical_consent = medical_consent
+                for field_name, value in medical_fields.items():
+                    setattr(profile, field_name, value[:5000])
+                profile.emergency_instructions = (request.POST.get('emergency_instructions', '') or '').strip()[:5000]
+                profile.safety_notes = (request.POST.get('safety_notes', '') or '').strip()[:5000]
+                profile.additional_emergency_information = (request.POST.get('additional_emergency_information', '') or '').strip()[:5000]
+                profile.save()
+
+                with get_register_db_connection() as connection:
+                    connection.execute(
+                        'UPDATE register SET contact_no = ?, email = ?, address = ? WHERE username = ?',
+                        (mobile_number, normalize_emergency_email(email), address, current_user),
+                    )
+                    connection.commit()
+                request.session['email'] = normalize_emergency_email(email)
+
+            sync_signup_emergency_contact_for_user(current_user, normalize_emergency_email(email), mobile_number)
+            messages.success(request, 'Your personal safety profile was saved.')
+            return redirect('MyAccount')
+
+    contacts = EmergencyContact.objects.filter(user=current_user).order_by('-is_primary', 'name')
+    account = get_registered_account(current_user)
+    return render(request, 'MyAccount.html', {
+        'profile': profile,
+        'account': account,
+        'contacts': contacts,
+        'form_errors': form_errors,
+        'blood_group_choices': PersonalSafetyProfile.BLOOD_GROUP_CHOICES,
+        'gender_choices': PersonalSafetyProfile.GENDER_CHOICES,
+    })
 
 
 def get_active_sos_for_user(user):
@@ -103,34 +289,20 @@ def get_current_safety_timer_for_user(user):
 def process_expired_safety_timer_for_user(user):
     if not user:
         return None
-
-    timer = SafetyTimerModel.objects.filter(user=user, status=SafetyTimerModel.STATUS_ACTIVE).order_by('-started_at').first()
-    if timer is None:
-        return None
-
-    if timezone.now() < timer.expires_at:
-        return None
-
-    timer.mark_expired()
-    active_event = get_active_sos_for_user(user)
-    if active_event is None:
-        active_event = SOSEvent.objects.create(
-            user=user,
-            latitude=None,
-            longitude=None,
-            status=SOSEvent.STATUS_ACTIVE,
-            activated_at=timezone.now(),
-        )
-        share_token = create_sos_live_location_share(active_event)
-        send_sos_emails_for_event(active_event, share_token=share_token)
-
-    return timer
+    process_safety_checkins(
+        owner_kind='timer',
+        user=user,
+        dispatch_emails=False,
+        allow_auto_sos=False,
+    )
+    return get_current_safety_timer_for_user(user)
 
 
 def get_registered_emergency_email_for_user(user):
     if not user:
         return ''
 
+    ensure_register_table()
     with get_register_db_connection() as conn:
         row = conn.execute(
             "SELECT email FROM register WHERE username = ?",
@@ -140,6 +312,19 @@ def get_registered_emergency_email_for_user(user):
     if row is None:
         return ''
     return (row['email'] or '').strip()
+
+
+def get_sos_email_contacts_for_user(user):
+    contacts = list(
+        EmergencyContact.objects.filter(user=user, is_active=True)
+        .exclude(email__isnull=True)
+        .exclude(email='')
+        .order_by('name')
+    )
+    if contacts:
+        return contacts
+    fallback_contact = get_signup_emergency_contact_for_user(user)
+    return [fallback_contact] if fallback_contact is not None else []
 
 
 def sync_signup_emergency_contact_for_user(user, email_value=None, phone_number=None):
@@ -197,15 +382,36 @@ def SafetyTimer(request):
         return redirect('Panic')
 
     active_event = get_active_sos_for_user(current_user)
+    checkin = (
+        timer.safety_checkins.order_by('-sequence').first()
+        if timer is not None
+        else None
+    )
+    device_heartbeat_stale = (
+        timer is None
+        or timer.last_device_seen_at is None
+        or timer.last_device_seen_at < timezone.now() - timedelta(minutes=2)
+    )
     return render(request, 'SafetyTimer.html', {
         'current_user': current_user,
         'timer': timer,
+        'checkin': checkin,
+        'device_heartbeat_stale': device_heartbeat_stale,
         'followed_mode': request.session.get(FOLLOWED_MODE_SESSION_KEY) == FOLLOWED_MODE,
         'duration_options': (5, 10, 15, 30),
+        'checkin_intervals': (5, 10, 15),
+        'grace_periods': (5, 10, 15),
+        'guardian_contacts': EmergencyContact.objects.filter(
+            user=current_user,
+            is_active=True,
+            email_consent=True,
+            email_verified_at__isnull=False,
+        ).exclude(email__isnull=True).exclude(email='').order_by('name'),
         'active_event': active_event,
         'emergency_contact_count': EmergencyContact.objects.filter(user=current_user, is_active=True).count(),
         'delivery_summary': get_sos_delivery_summary(active_event),
         'public_location_link_configured': bool(build_sos_live_location_url('configuration-check')),
+        'public_location_link_diagnostic': get_sos_public_base_url_diagnostic(),
     })
 
 
@@ -226,20 +432,68 @@ def SafetyTimerAction(request):
             duration_minutes = int(duration_value)
         except (TypeError, ValueError):
             duration_minutes = 15
-        duration_minutes = max(1, duration_minutes)
+        if duration_minutes not in (5, 10, 15, 30):
+            duration_minutes = 15
+    interval_value = request.POST.get('checkin_interval_minutes', '15')
+    grace_value = request.POST.get('grace_period_minutes', '15')
+    try:
+        interval_minutes = int(interval_value)
+        grace_minutes = int(grace_value)
+    except (TypeError, ValueError):
+        interval_minutes = 15
+        grace_minutes = 15
+    if interval_minutes not in (5, 10, 15):
+        interval_minutes = 15
+    if grace_minutes not in (5, 10, 15):
+        grace_minutes = 15
 
-    SafetyTimerModel.objects.filter(user=current_user, status=SafetyTimerModel.STATUS_ACTIVE).update(
-        status=SafetyTimerModel.STATUS_CANCELLED,
-        completed_at=timezone.now(),
-    )
-
-    timer = SafetyTimerModel.objects.create(
+    guardian_enabled = request.POST.get('guardian_enabled') == 'true'
+    contact_ids = request.POST.getlist('guardian_contact_ids')
+    contacts = EmergencyContact.objects.filter(
         user=current_user,
-        started_at=timezone.now(),
-        expires_at=timezone.now() + timedelta(minutes=duration_minutes),
-        duration=duration_minutes,
-        status=SafetyTimerModel.STATUS_ACTIVE,
-    )
+        is_active=True,
+        email_consent=True,
+        email_verified_at__isnull=False,
+        pk__in=contact_ids,
+    ).exclude(email__isnull=True).exclude(email='')
+    if guardian_enabled and (not contact_ids or contacts.count() != len(set(contact_ids))):
+        messages.error(request, 'Select only active emergency contacts with verified, consented email addresses.')
+        return redirect('SafetyTimer')
+
+    now = timezone.now()
+    with transaction.atomic():
+        old_timers = SafetyTimerModel.objects.filter(
+            user=current_user,
+            status__in=(SafetyTimerModel.STATUS_ACTIVE, SafetyTimerModel.STATUS_EXPIRED),
+        )
+        for old_timer in old_timers:
+            cancel_owner_checkins(old_timer, now)
+        old_timers.update(
+            status=SafetyTimerModel.STATUS_CANCELLED,
+            completed_at=now,
+            updated_at=now,
+        )
+
+        timer = SafetyTimerModel.objects.create(
+            user=current_user,
+            started_at=now,
+            expires_at=now + timedelta(minutes=duration_minutes),
+            duration=duration_minutes,
+            checkin_interval_minutes=interval_minutes,
+            grace_period_minutes=grace_minutes,
+            guardian_enabled=guardian_enabled,
+            auto_sos_on_unconfirmed=request.POST.get('auto_sos_on_unconfirmed') == 'true',
+            share_location_with_contacts=request.POST.get('share_location_with_contacts') == 'true',
+            location_status=(
+                'PENDING'
+                if request.POST.get('share_location_with_contacts') == 'true'
+                else 'NOT_SHARED'
+            ),
+            status=SafetyTimerModel.STATUS_ACTIVE,
+        )
+        if guardian_enabled:
+            timer.guardian_contacts.set(contacts)
+        schedule_checkin(timer, now=now)
     if followed_mode:
         request.session[FOLLOWED_MODE_SESSION_KEY] = FOLLOWED_MODE
     else:
@@ -256,8 +510,28 @@ def SafetyTimerSafe(request):
         return redirect_response
 
     timer = get_current_safety_timer_for_user(current_user)
-    if timer is not None and timer.status in (SafetyTimerModel.STATUS_ACTIVE, SafetyTimerModel.STATUS_EXPIRED):
-        timer.mark_completed()
+    if timer is not None and timer.status in (
+        SafetyTimerModel.STATUS_ACTIVE,
+        SafetyTimerModel.STATUS_EXPIRED,
+        SafetyTimerModel.STATUS_UNCONFIRMED,
+    ):
+        now = timezone.now()
+        with transaction.atomic():
+            changed = SafetyTimerModel.objects.filter(
+                pk=timer.pk,
+                status__in=(
+                    SafetyTimerModel.STATUS_ACTIVE,
+                    SafetyTimerModel.STATUS_EXPIRED,
+                    SafetyTimerModel.STATUS_UNCONFIRMED,
+                ),
+            ).update(
+                status=SafetyTimerModel.STATUS_COMPLETED,
+                completed_at=now,
+                updated_at=now,
+            )
+            if changed:
+                confirm_owner_checkin(timer, now)
+                cancel_owner_checkins(timer, now)
 
     event = get_active_sos_for_user(current_user)
     if event is not None:
@@ -277,10 +551,111 @@ def SafetyTimerCancel(request):
         return redirect_response
 
     timer = get_current_safety_timer_for_user(current_user)
-    if timer is not None and timer.status == SafetyTimerModel.STATUS_ACTIVE:
-        timer.mark_cancelled()
+    if timer is not None and timer.status in (
+        SafetyTimerModel.STATUS_ACTIVE,
+        SafetyTimerModel.STATUS_EXPIRED,
+        SafetyTimerModel.STATUS_UNCONFIRMED,
+    ):
+        now = timezone.now()
+        with transaction.atomic():
+            changed = SafetyTimerModel.objects.filter(
+                pk=timer.pk,
+                status__in=(
+                    SafetyTimerModel.STATUS_ACTIVE,
+                    SafetyTimerModel.STATUS_EXPIRED,
+                    SafetyTimerModel.STATUS_UNCONFIRMED,
+                ),
+            ).update(
+                status=SafetyTimerModel.STATUS_CANCELLED,
+                completed_at=now,
+                updated_at=now,
+            )
+            if changed:
+                cancel_owner_checkins(timer, now)
 
     request.session.pop(FOLLOWED_MODE_SESSION_KEY, None)
+    return redirect('SafetyTimer')
+
+
+def SafetyTimerExtend(request):
+    if request.method != 'POST':
+        return redirect('SafetyTimer')
+
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
+        return redirect_response
+    timer = get_current_safety_timer_for_user(current_user)
+    if timer is None:
+        messages.error(request, 'There is no active or grace-period timer to extend.')
+        return redirect('SafetyTimer')
+    try:
+        extension_minutes = int(request.POST.get('minutes', ''))
+    except (TypeError, ValueError):
+        extension_minutes = 0
+    if extension_minutes not in (5, 10, 15, 30):
+        messages.error(request, 'Choose a supported timer extension.')
+        return redirect('SafetyTimer')
+
+    now = timezone.now()
+    with transaction.atomic():
+        timer = SafetyTimerModel.objects.select_for_update().filter(
+            pk=timer.pk,
+            user=current_user,
+            status__in=(SafetyTimerModel.STATUS_ACTIVE, SafetyTimerModel.STATUS_EXPIRED),
+        ).first()
+        if timer is None:
+            messages.error(request, 'The timer is no longer active or in its grace period.')
+            return redirect('SafetyTimer')
+
+        current_checkin = timer.safety_checkins.filter(
+            status__in=(
+                SafetyCheckIn.STATUS_SCHEDULED,
+                SafetyCheckIn.STATUS_DUE,
+                SafetyCheckIn.STATUS_UNCONFIRMED,
+            ),
+        ).order_by('-sequence').first()
+        if current_checkin and current_checkin.status == SafetyCheckIn.STATUS_UNCONFIRMED:
+            messages.error(request, 'The check-in is already unconfirmed; confirm safety or cancel the timer.')
+            return redirect('SafetyTimer')
+        if current_checkin:
+            cancelled = SafetyCheckIn.objects.filter(
+                pk=current_checkin.pk,
+                status__in=(SafetyCheckIn.STATUS_SCHEDULED, SafetyCheckIn.STATUS_DUE),
+            ).update(
+                status=SafetyCheckIn.STATUS_CANCELLED,
+                updated_at=now,
+            )
+            if not cancelled:
+                messages.error(request, 'The check-in changed while extending the timer. Refresh and retry.')
+                return redirect('SafetyTimer')
+            SafetyCheckInAttempt.objects.filter(
+                checkin=current_checkin,
+                status=SafetyCheckInAttempt.STATUS_QUEUED,
+            ).update(
+                status=SafetyCheckInAttempt.STATUS_SKIPPED,
+                completed_at=now,
+                error_message='The timer was extended before this reminder was presented.',
+                updated_at=now,
+            )
+
+        updated = SafetyTimerModel.objects.filter(
+            pk=timer.pk,
+            status__in=(SafetyTimerModel.STATUS_ACTIVE, SafetyTimerModel.STATUS_EXPIRED),
+        ).update(
+            expires_at=now + timedelta(minutes=extension_minutes),
+            duration=F('duration') + extension_minutes,
+            status=SafetyTimerModel.STATUS_ACTIVE,
+            completed_at=None,
+            updated_at=now,
+        )
+        if not updated:
+            messages.error(request, 'The timer changed while extending it. Refresh and retry.')
+            return redirect('SafetyTimer')
+        timer.refresh_from_db()
+        cancel_owner_checkins(timer, now)
+        schedule_checkin(timer, now=now)
+
+    messages.success(request, 'Safety timer extended. A new check-in has been scheduled.')
     return redirect('SafetyTimer')
 
 
@@ -304,15 +679,33 @@ def create_sos_live_location_share(sos_event):
 
 
 def resolve_sos_event(event, status=SOSEvent.STATUS_RESOLVED):
-    if status == SOSEvent.STATUS_CANCELLED:
-        event.mark_cancelled()
-    else:
-        event.mark_resolved()
+    if event is None or event.pk is None:
+        raise ValueError('A persisted SOS event is required.')
 
-    try:
-        event.live_location_share.revoke()
-    except SOSLiveLocationShare.DoesNotExist:
-        pass
+    with transaction.atomic():
+        persisted_event = SOSEvent.objects.select_for_update().filter(pk=event.pk).first()
+        if persisted_event is None:
+            return None
+
+        if persisted_event.status == SOSEvent.STATUS_ACTIVE:
+            if status == SOSEvent.STATUS_CANCELLED:
+                persisted_event.mark_cancelled()
+            else:
+                persisted_event.mark_resolved()
+
+        stop_reason = (
+            SOSEvent.STATUS_CANCELLED
+            if persisted_event.status == SOSEvent.STATUS_CANCELLED
+            else SOSEvent.STATUS_RESOLVED
+        )
+        stop_sos_escalation(persisted_event, stop_reason)
+        try:
+            persisted_event.live_location_share.revoke()
+        except SOSLiveLocationShare.DoesNotExist:
+            pass
+
+    event.status = persisted_event.status
+    return persisted_event
 
 
 def build_sos_live_location_url(token):
@@ -329,6 +722,15 @@ def get_sos_public_base_url_from_environment():
     if 'SOS_PUBLIC_BASE_URL' in os.environ:
         return (os.environ.get('SOS_PUBLIC_BASE_URL') or '').strip().rstrip('/')
     return (getattr(settings, 'SOS_PUBLIC_BASE_URL', '') or '').strip().rstrip('/')
+
+
+def get_sos_public_base_url_diagnostic():
+    public_base_url = get_sos_public_base_url_from_environment()
+    if not public_base_url:
+        return 'SOS_PUBLIC_BASE_URL is missing. Email alerts can still include the last saved coordinates.'
+    if not get_valid_sos_public_base_url():
+        return 'SOS_PUBLIC_BASE_URL is not a valid, publicly resolvable HTTPS origin. Email alerts can still include the last saved coordinates.'
+    return ''
 
 
 def get_valid_sos_public_base_url():
@@ -395,7 +797,12 @@ def get_valid_sos_public_base_url():
     return public_base_url
 
 
-def build_sos_email_body(sos_event, user_name, live_location_url=''):
+def build_sos_email_body(
+    sos_event,
+    user_name,
+    live_location_url='',
+    emergency_instructions='',
+):
     name = (user_name or 'User').strip() or 'User'
     lines = [
         'Hello,',
@@ -407,8 +814,33 @@ def build_sos_email_body(sos_event, user_name, live_location_url=''):
         map_link = 'https://www.google.com/maps?q={},{}'.format(sos_event.latitude, sos_event.longitude)
         lines.append('Location: {}, {}'.format(sos_event.latitude, sos_event.longitude))
         lines.append('Google Maps: {}'.format(map_link))
+        if sos_event.location_updated_at is not None:
+            location_time = timezone.localtime(sos_event.location_updated_at)
+            lines.append(
+                'Location last updated: {}'.format(
+                    location_time.strftime('%Y-%m-%d %H:%M:%S %Z')
+                )
+            )
+            location_age = timezone.now() - sos_event.location_updated_at
+            if timedelta(0) <= location_age <= SOS_LIVE_LOCATION_STALE_AFTER:
+                lines.append(
+                    'This location update is recent, but GPS accuracy and current availability are not guaranteed.'
+                )
+            else:
+                lines.append(
+                    'This is the last known location and may be stale; it does not confirm the user is still there.'
+                )
+        else:
+            lines.append(
+                'The location timestamp is unavailable; treat these coordinates as potentially stale.'
+            )
     else:
         lines.append('Location is currently unavailable.')
+
+    if emergency_instructions:
+        lines.append('User-provided emergency instructions: {}'.format(
+            emergency_instructions.strip()
+        ))
 
     if live_location_url:
         lines.extend([
@@ -418,63 +850,198 @@ def build_sos_email_body(sos_event, user_name, live_location_url=''):
         ])
     else:
         lines.append(
-            'A secure external live-location link is not configured for this alert. '
-            'This email contains only the initial location, if available.'
+            'No secure public live-location link is included in this alert. '
+            'Use the saved coordinates above if available.'
         )
 
     return '\n\n'.join(lines)
 
 
 def get_sos_delivery_summary(event):
+    summary = {
+        'sent': 0,
+        'failed': 0,
+        'pending': 0,
+        'no_email': 0,
+        'unattempted': 0,
+        'can_retry': False,
+        'failures': [],
+        'email_failures': [],
+        'eligible_contacts': 0,
+        'ineligible_email_contacts': 0,
+        'email_accepted': 0,
+        'email_delivered': 0,
+        'email_failed': 0,
+        'email_pending': 0,
+        'email_uncertain': 0,
+        'email_unattempted': 0,
+        'source': 'none',
+        'legacy_only': False,
+        'workflow_attempt_count': 0,
+        'queued': 0,
+        'sending': 0,
+        'accepted': 0,
+        'delivered': 0,
+        'no_answer': 0,
+        'busy': 0,
+        'uncertain': 0,
+        'uncertain_outcomes': [],
+        'acknowledged': 0,
+        'cancelled': 0,
+        'legacy_records': 0,
+        'legacy_accepted': 0,
+        'legacy_failed': 0,
+        'legacy_pending': 0,
+        'legacy_uncertain': 0,
+    }
     if event is None:
-        return {
-            'sent': 0,
-            'failed': 0,
-            'pending': 0,
-            'no_email': 0,
-            'unattempted': 0,
-            'can_retry': False,
-            'failures': [],
-        }
+        return summary
+
+    contact_queryset = EmergencyContact.objects.filter(user=event.user, is_active=True)
+    contacts_with_email_ids = set(
+        contact_queryset.exclude(email__isnull=True)
+        .exclude(email='')
+        .values_list('pk', flat=True)
+    )
+    eligible_contact_ids = {
+        contact.pk
+        for contact in get_eligible_contacts(
+            event,
+            SOSNotificationAttempt.CHANNEL_EMAIL,
+        )
+    }
+    summary['eligible_contacts'] = len(eligible_contact_ids)
+    summary['ineligible_email_contacts'] = len(
+        contacts_with_email_ids - eligible_contact_ids
+    )
+    summary['no_email'] = contact_queryset.filter(
+        Q(email__isnull=True) | Q(email='')
+    ).count()
+
+    attempts = SOSNotificationAttempt.objects.filter(sos_event=event).order_by(
+        'emergency_contact_id',
+        'channel',
+        '-attempt_number',
+        '-created_at',
+        '-pk',
+    )
+    latest_attempts = {}
+    for attempt in attempts:
+        key = (attempt.emergency_contact_id, attempt.channel)
+        if key not in latest_attempts:
+            latest_attempts[key] = attempt
 
     deliveries = SOSEmailDelivery.objects.filter(sos_event=event)
-    contact_queryset = EmergencyContact.objects.filter(user=event.user, is_active=True)
-    eligible_contacts = contact_queryset.exclude(email__isnull=True).exclude(email='')
-    no_email = contact_queryset.filter(Q(email__isnull=True) | Q(email=''))
+    summary['legacy_records'] = deliveries.count()
+    summary['legacy_accepted'] = deliveries.filter(
+        status=SOSEmailDelivery.STATUS_SENT
+    ).count()
 
-    registered_email = get_registered_emergency_email_for_user(event.user)
-    if not eligible_contacts.exists() and registered_email:
-        fallback_contact = get_signup_emergency_contact_for_user(event.user)
-        if fallback_contact is not None:
-            eligible_contacts = EmergencyContact.objects.filter(pk=fallback_contact.pk)
-            no_email = EmergencyContact.objects.none()
+    if latest_attempts:
+        summary['source'] = 'workflow'
+        summary['workflow_attempt_count'] = len(latest_attempts)
+        attempted_email_contacts = set()
+        email_attempts = []
+        for attempt in latest_attempts.values():
+            status_key = attempt.status.lower()
+            if status_key in summary:
+                summary[status_key] += 1
+            if attempt.channel == SOSNotificationAttempt.CHANNEL_EMAIL:
+                attempted_email_contacts.add(attempt.emergency_contact_id)
+                email_attempts.append(attempt)
+            if attempt.status == SOSNotificationAttempt.STATUS_UNCERTAIN:
+                summary['uncertain_outcomes'].append({
+                    'reason': (
+                        'The notification outcome is uncertain; it was not '
+                        'counted as failed or delivered.'
+                    ),
+                })
+            elif attempt.status in (
+                SOSNotificationAttempt.STATUS_FAILED,
+                SOSNotificationAttempt.STATUS_NO_ANSWER,
+                SOSNotificationAttempt.STATUS_BUSY,
+            ):
+                failure = {
+                    'contact_name': 'Emergency contact',
+                    'reason': {
+                        SOSNotificationAttempt.STATUS_FAILED: 'The notification failed.',
+                        SOSNotificationAttempt.STATUS_NO_ANSWER: 'The call was not answered.',
+                        SOSNotificationAttempt.STATUS_BUSY: 'The call channel was busy.',
+                    }[attempt.status],
+                }
+                summary['failures'].append(failure)
+                if attempt.channel == SOSNotificationAttempt.CHANNEL_EMAIL:
+                    summary['email_failures'].append({
+                        'contact_name': failure['contact_name'],
+                        'reason': safe_sos_email_failure_reason(
+                            attempt.error_message or attempt.error_code
+                        ),
+                    })
 
-    failed_deliveries = deliveries.filter(
+        summary['sent'] = summary['delivered']
+        summary['pending'] = summary['queued'] + summary['sending']
+        summary['email_accepted'] = sum(
+            attempt.status == SOSNotificationAttempt.STATUS_ACCEPTED
+            for attempt in email_attempts
+        )
+        summary['email_delivered'] = sum(
+            attempt.status == SOSNotificationAttempt.STATUS_DELIVERED
+            for attempt in email_attempts
+        )
+        summary['email_failed'] = sum(
+            attempt.status == SOSNotificationAttempt.STATUS_FAILED
+            for attempt in email_attempts
+        )
+        summary['email_pending'] = sum(
+            attempt.status in (
+                SOSNotificationAttempt.STATUS_QUEUED,
+                SOSNotificationAttempt.STATUS_SENDING,
+            )
+            for attempt in email_attempts
+        )
+        summary['email_uncertain'] = sum(
+            attempt.status == SOSNotificationAttempt.STATUS_UNCERTAIN
+            for attempt in email_attempts
+        )
+        summary['unattempted'] = len(
+            eligible_contact_ids - attempted_email_contacts
+        )
+        summary['email_unattempted'] = summary['unattempted']
+        return summary
+
+    if not summary['legacy_records']:
+        summary['unattempted'] = len(eligible_contact_ids)
+        summary['email_unattempted'] = summary['unattempted']
+        return summary
+
+    summary['source'] = 'legacy'
+    summary['legacy_only'] = True
+    summary['legacy_failed'] = deliveries.filter(
         status=SOSEmailDelivery.STATUS_FAILED
-    ).select_related('emergency_contact')
-    retry_safe = list(failed_deliveries.values_list('error_message', flat=True))
-
-    return {
-        'sent': deliveries.filter(status=SOSEmailDelivery.STATUS_SENT).count(),
-        'failed': deliveries.filter(status=SOSEmailDelivery.STATUS_FAILED).count(),
-        'pending': deliveries.filter(status=SOSEmailDelivery.STATUS_PENDING).count(),
-        'no_email': no_email.count(),
-        'eligible_contacts': eligible_contacts.count(),
-        'unattempted': max(eligible_contacts.count() - deliveries.count(), 0),
-        'can_retry': (
-            event.status == SOSEvent.STATUS_ACTIVE
-            and bool(retry_safe)
-            and all(is_sos_delivery_retry_safe(error) for error in retry_safe)
-            and not deliveries.filter(status=SOSEmailDelivery.STATUS_SENT).exists()
-        ),
-        'failures': [
-            {
-                'contact_name': delivery.emergency_contact.name,
-                'reason': safe_sos_email_failure_reason(delivery.error_message),
-            }
-            for delivery in failed_deliveries
-        ],
-    }
+    ).count()
+    summary['legacy_pending'] = deliveries.filter(
+        status__in=(SOSEmailDelivery.STATUS_PENDING, SOSEmailDelivery.STATUS_SENDING)
+    ).count()
+    summary['legacy_uncertain'] = deliveries.filter(
+        status=SOSEmailDelivery.STATUS_UNCERTAIN
+    ).count()
+    summary['email_accepted'] = summary['legacy_accepted']
+    summary['email_failed'] = summary['legacy_failed']
+    summary['email_pending'] = summary['legacy_pending']
+    summary['email_uncertain'] = summary['legacy_uncertain']
+    attempted_legacy_contacts = set(
+        deliveries.values_list('emergency_contact_id', flat=True)
+    )
+    summary['unattempted'] = len(eligible_contact_ids - attempted_legacy_contacts)
+    summary['email_unattempted'] = summary['unattempted']
+    for delivery in deliveries.filter(status=SOSEmailDelivery.STATUS_FAILED):
+        failure = {
+            'contact_name': 'Emergency contact',
+            'reason': 'The legacy email submission failed.',
+        }
+        summary.setdefault('legacy_failures', []).append(failure)
+        summary['email_failures'].append(failure)
+    return summary
 
 
 def safe_sos_email_failure_reason(error):
@@ -490,6 +1057,8 @@ def safe_sos_email_failure_reason(error):
         error = str(error)
 
     message = (error or '').lower()
+    if 'outcome could not be confirmed' in message or 'delivery is unknown' in message:
+        return 'The email outcome could not be confirmed; retry was blocked to prevent duplicate alerts.'
     if 'sos_public_base_url' in message or 'publicly reachable https' in message:
         return 'No email was sent because SOS_PUBLIC_BASE_URL is not configured as a public HTTPS origin.'
     if 'smtp is not configured' in message or 'panic_email_user' in message or 'panic_email_pass' in message:
@@ -508,6 +1077,7 @@ def is_sos_delivery_retry_safe(error_message):
     return any(marker in message for marker in (
         'sos_public_base_url',
         'smtp is not configured',
+        'email sending is not configured',
         'sender credentials',
         'could not connect to the smtp server',
         'smtp server refused this recipient',
@@ -518,100 +1088,44 @@ def is_sos_delivery_retry_safe(error_message):
 
 
 def send_sos_emails_for_event(sos_event, share_token=None, delivery_ids=None):
-    if (
-        sos_event is None
-        or sos_event.status != SOSEvent.STATUS_ACTIVE
-        or not SOSEvent.objects.filter(pk=sos_event.pk, status=SOSEvent.STATUS_ACTIVE).exists()
-    ):
-        return False
-
-    public_link_configured = bool(get_valid_sos_public_base_url())
-    if share_token is None and public_link_configured:
-        try:
-            share_token = create_sos_live_location_share(sos_event)
-        except Exception:
-            logger.exception('Unable to create live location sharing access for SOS event %s', sos_event.pk)
-            share_token = None
-
-    eligible_contacts = list(EmergencyContact.objects.filter(user=sos_event.user, is_active=True).exclude(email__isnull=True).exclude(email='').order_by('name'))
-    if not eligible_contacts:
-        fallback_contact = get_signup_emergency_contact_for_user(sos_event.user)
-        if fallback_contact is not None:
-            eligible_contacts = [fallback_contact]
-        else:
-            return True
-    if delivery_ids is not None:
-        retry_contact_ids = set(SOSEmailDelivery.objects.filter(
-            pk__in=delivery_ids,
-            sos_event=sos_event,
-        ).values_list('emergency_contact_id', flat=True))
-        eligible_contacts = [contact for contact in eligible_contacts if contact.pk in retry_contact_ids]
-
-    live_location_url = build_sos_live_location_url(share_token) if share_token and get_valid_sos_public_base_url() else ''
-
-    sender_email, sender_password = get_panic_email_config()
-
-    if not sender_email or not sender_password:
-        for contact in eligible_contacts:
-            delivery, created = SOSEmailDelivery.objects.get_or_create(sos_event=sos_event, emergency_contact=contact)
-            if delivery.status == SOSEmailDelivery.STATUS_SENT or delivery.status == SOSEmailDelivery.STATUS_FAILED:
-                continue
-            delivery.mark_failed(safe_sos_email_failure_reason('SMTP is not configured for this environment.'))
-        return True
-
-    sendable_contacts = []
-    for contact in eligible_contacts:
-        delivery, created = SOSEmailDelivery.objects.get_or_create(sos_event=sos_event, emergency_contact=contact)
-        if delivery.status == SOSEmailDelivery.STATUS_SENT or delivery.status == SOSEmailDelivery.STATUS_FAILED:
-            continue
-        try:
-            validate_email(contact.email)
-        except ValidationError:
-            delivery.mark_failed('This emergency contact has an invalid email address.')
-            continue
-        sendable_contacts.append((contact, delivery))
-
-    if not sendable_contacts:
-        return True
-
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as connection:
-            connection.login(sender_email, sender_password)
-            for contact, delivery in sendable_contacts:
-                message = build_sos_email_body(sos_event, sos_event.user, live_location_url)
-                msg = "From: {}\nTo: {}\nSubject: {}\n\n{}".format(
-                    sender_email,
-                    contact.email,
-                    build_sos_email_subject(sos_event.user),
-                    message,
-                )
-                try:
-                    refused = connection.sendmail(from_addr=sender_email, to_addrs=[contact.email], msg=msg)
-                    if isinstance(refused, dict) and refused:
-                        refusal = next(iter(refused.values()))
-                        code = refusal[0] if isinstance(refusal, tuple) else None
-                        reason = 'The SMTP server refused this recipient.'
-                        if code:
-                            reason = 'The SMTP server refused this recipient (response code {}).'.format(code)
-                        delivery.mark_failed(reason)
-                    else:
-                        delivery.mark_sent()
-                except Exception as exc:
-                    reason = safe_sos_email_failure_reason(exc)
-                    logger.warning('SOS email delivery failed for event %s: %s', sos_event.pk, reason)
-                    delivery.mark_failed(reason)
-    except Exception as exc:
-        reason = safe_sos_email_failure_reason(exc)
-        logger.warning('SOS email batch failed for event %s: %s', sos_event.pk, reason)
-        for contact, delivery in sendable_contacts:
-            if delivery.status == SOSEmailDelivery.STATUS_SENT or delivery.status == SOSEmailDelivery.STATUS_FAILED:
-                continue
-            delivery.mark_failed(reason)
-    return True
+    logger.warning(
+        'Legacy SOS email delivery is disabled; use the SOS escalation service instead.'
+    )
+    return False
 
 
 def SOSDashboard(request):
     return Panic(request)
+
+
+def activate_sos_event_for_user(user, latitude=None, longitude=None):
+    for _ in range(20):
+        try:
+            with transaction.atomic():
+                active_event = get_active_sos_for_user(user)
+                if active_event is not None:
+                    return active_event, None, False
+
+                event = SOSEvent.objects.create(
+                    user=user,
+                    latitude=latitude,
+                    longitude=longitude,
+                    location_updated_at=timezone.now() if latitude is not None else None,
+                    status=SOSEvent.STATUS_ACTIVE,
+                    activated_at=timezone.now(),
+                )
+                share_token = create_sos_live_location_share(event)
+                return event, share_token, True
+        except (IntegrityError, OperationalError):
+            time.sleep(0.02)
+
+    try:
+        active_event = get_active_sos_for_user(user)
+        if active_event is not None:
+            return active_event, None, False
+        return None, None, False
+    except OperationalError:
+        return None, None, False
 
 
 def ActivateSOS(request):
@@ -622,26 +1136,28 @@ def ActivateSOS(request):
     if request.method != 'POST':
         return redirect('SOSDashboard')
 
-    active_event = get_active_sos_for_user(current_user)
-    if active_event is not None:
-        return redirect('SOSDashboard')
-
     latitude, longitude = parse_sos_coordinates(
         request.POST.get('latitude', ''),
         request.POST.get('longitude', ''),
     )
 
-    event = SOSEvent.objects.create(
-        user=current_user,
-        latitude=latitude,
-        longitude=longitude,
-        location_updated_at=timezone.now() if latitude is not None else None,
-        status=SOSEvent.STATUS_ACTIVE,
-        activated_at=timezone.now(),
-    )
-    share_token = create_sos_live_location_share(event)
-    configured_share_token = share_token if get_valid_sos_public_base_url() else None
-    send_sos_emails_for_event(event, share_token=configured_share_token)
+    event, _, _ = activate_sos_event_for_user(current_user, latitude, longitude)
+    if event is None:
+        messages.error(request, 'SOS could not be activated. Please retry.')
+        return redirect('SOSDashboard')
+
+    try:
+        start_sos_escalation(event)
+    except Exception as exc:
+        logger.error(
+            'SOS escalation could not be started for event %s (error type: %s).',
+            event.pk,
+            type(exc).__name__,
+        )
+        messages.error(
+            request,
+            'SOS is active, but automatic contact escalation could not start. Please seek help directly.',
+        )
     return redirect('SOSDashboard')
 
 
@@ -683,12 +1199,51 @@ def UpdateSOSStatus(request):
     return redirect('SOSDashboard')
 
 
+@csrf_exempt
+def SOSWebAcknowledgement(request):
+    if request.method != 'POST':
+        response = JsonResponse({'error': 'POST is required.'}, status=405)
+    elif request.content_type != 'application/json':
+        response = JsonResponse({'error': 'A JSON request body is required.'}, status=415)
+    else:
+        try:
+            content_length = int(request.META.get('CONTENT_LENGTH') or 0)
+        except ValueError:
+            content_length = -1
+        if content_length < 0:
+            response = JsonResponse({'error': 'Invalid request size.'}, status=400)
+        elif content_length > 512:
+            response = JsonResponse({'error': 'Request is too large.'}, status=413)
+        else:
+            try:
+                body = request.body
+                if len(body) > 512:
+                    response = JsonResponse({'error': 'Request is too large.'}, status=413)
+                else:
+                    payload = json.loads(body.decode('utf-8'))
+                    token = payload.get('token') if isinstance(payload, dict) else None
+                    if not isinstance(token, str) or not token or len(token) > 128:
+                        raise ValueError('A valid acknowledgement token is required.')
+                    record_web_acknowledgement(token)
+                    response = JsonResponse({'status': 'acknowledged'})
+            except (UnicodeDecodeError, ValueError):
+                response = JsonResponse(
+                    {'error': 'This acknowledgement link is invalid, expired, or already used.'},
+                    status=400,
+                )
+
+    response['Cache-Control'] = 'no-store, private'
+    response['Referrer-Policy'] = 'no-referrer'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
 def SOSLocationUpdate(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST is required.'}, status=405)
 
-    current_user = request.session.get('username')
-    if not current_user:
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
         return JsonResponse({'error': 'Authentication is required.'}, status=401)
 
     try:
@@ -730,8 +1285,8 @@ def SOSLocationStatus(request):
     if request.method != 'GET':
         return JsonResponse({'error': 'GET is required.'}, status=405)
 
-    current_user = request.session.get('username')
-    if not current_user:
+    current_user, redirect_response = require_logged_in_user(request)
+    if redirect_response is not None:
         return JsonResponse({'error': 'Authentication is required.'}, status=401)
 
     event = get_active_sos_for_user(current_user)
@@ -776,69 +1331,18 @@ def RetrySOSEmail(request):
         messages.error(request, 'There is no active SOS to retry.')
         return redirect('SOSDashboard')
 
-    sender_email, sender_password = get_panic_email_config()
-    if not sender_email or not sender_password:
-        messages.error(request, 'Email retry is unavailable until PANIC_EMAIL_USER and PANIC_EMAIL_PASS are configured.')
+    try:
+        start_sos_escalation(event)
+    except Exception as exc:
+        logger.error(
+            'SOS escalation processing could not be started from the retry action for event %s (error type: %s).',
+            event.pk,
+            type(exc).__name__,
+        )
+        messages.error(request, 'SOS notifications could not be processed. The scheduled escalation will retry safely.')
         return redirect('SOSDashboard')
 
-    claimed_deliveries = []
-    with transaction.atomic():
-        event = SOSEvent.objects.select_for_update().filter(
-            pk=event.pk,
-            user=current_user,
-            status=SOSEvent.STATUS_ACTIVE,
-        ).first()
-        if event is None:
-            messages.error(request, 'There is no active SOS to retry.')
-            return redirect('SOSDashboard')
-
-        deliveries = SOSEmailDelivery.objects.filter(sos_event=event)
-        if deliveries.filter(status=SOSEmailDelivery.STATUS_SENT).exists():
-            messages.error(
-                request,
-                'Retry is blocked because a notification was already accepted; rotating its secure location link could invalidate it.',
-            )
-            return redirect('SOSDashboard')
-
-        failed_deliveries = list(deliveries.filter(status=SOSEmailDelivery.STATUS_FAILED))
-        failed_ids = [delivery.pk for delivery in failed_deliveries]
-        if not failed_ids:
-            messages.info(request, 'There are no failed notifications available to retry.')
-            return redirect('SOSDashboard')
-        if not all(is_sos_delivery_retry_safe(delivery.error_message) for delivery in failed_deliveries):
-            messages.error(
-                request,
-                'Retry is blocked because a previous SMTP outcome may be ambiguous; retrying could send a duplicate alert.',
-            )
-            return redirect('SOSDashboard')
-
-        claimed_count = SOSEmailDelivery.objects.filter(
-            pk__in=failed_ids,
-            status=SOSEmailDelivery.STATUS_FAILED,
-        ).update(status=SOSEmailDelivery.STATUS_PENDING, error_message='')
-        if not claimed_count:
-            messages.info(request, 'These notifications are already being retried.')
-            return redirect('SOSDashboard')
-
-        claimed_deliveries = list(SOSEmailDelivery.objects.filter(
-            pk__in=failed_ids,
-            status=SOSEmailDelivery.STATUS_PENDING,
-        ))
-        share_token = None
-        if build_sos_live_location_url('configuration-check'):
-            share_token = rotate_sos_live_location_share(event)
-
-    send_sos_emails_for_event(
-        event,
-        share_token=share_token,
-        delivery_ids=[delivery.pk for delivery in claimed_deliveries],
-    )
-    messages.info(
-        request,
-        '{} failed notification(s) retried. Check their current status below; SMTP acceptance is not proof of receipt.'.format(
-            len(claimed_deliveries)
-        ),
-    )
+    messages.info(request, 'SOS notification retries are handled by the escalation policy; ambiguous attempts are not resent.')
     return redirect('SOSDashboard')
 
 
@@ -943,6 +1447,7 @@ def EmergencyContactAdd(request):
     if request.method == 'POST':
         name = (request.POST.get('name', '') or '').strip()
         phone_number = (request.POST.get('phone_number', '') or '').strip()
+        alternative_phone_number = (request.POST.get('alternative_phone_number', '') or '').strip()
         email = (request.POST.get('email', '') or '').strip() or None
         relationship = (request.POST.get('relationship', '') or '').strip() or None
         is_primary = request.POST.get('is_primary') == 'on'
@@ -953,6 +1458,7 @@ def EmergencyContactAdd(request):
             user=current_user,
             name=name,
             phone_number=phone_number,
+            alternative_phone_number=alternative_phone_number,
             email=email,
             relationship=relationship,
             is_primary=is_primary,
@@ -972,6 +1478,7 @@ def EmergencyContactAdd(request):
                 'form_data': {
                     'name': name,
                     'phone_number': phone_number,
+                    'alternative_phone_number': alternative_phone_number,
                     'email': email or '',
                     'relationship': relationship or '',
                     'is_primary': is_primary,
@@ -995,6 +1502,7 @@ def EmergencyContactEdit(request, contact_id):
     if request.method == 'POST':
         contact.name = (request.POST.get('name', '') or '').strip()
         contact.phone_number = (request.POST.get('phone_number', '') or '').strip()
+        contact.alternative_phone_number = (request.POST.get('alternative_phone_number', '') or '').strip()
         contact.email = (request.POST.get('email', '') or '').strip() or None
         contact.relationship = (request.POST.get('relationship', '') or '').strip() or None
         contact.is_primary = request.POST.get('is_primary') == 'on'
@@ -1107,6 +1615,8 @@ def Route(request):
             'journey_contacts': EmergencyContact.objects.filter(
                 user=session_user,
                 is_active=True,
+                email_consent=True,
+                email_verified_at__isnull=False,
             ).exclude(email__isnull=True).exclude(email='') if session_user else EmergencyContact.objects.none(),
             'resume_journey': resume_journey,
         })
@@ -1155,154 +1665,14 @@ def RouteAction(request):
 
 def Heatmap(request):
     if request.method == 'GET':
-        crime_categories = {
-            'All Crimes Against Women': 'All Crimes Against Women',
-            'Rape': 'Rape',
-            'K&A': 'Kidnapping and Abduction',
-            'DD': 'Dowry Deaths',
-            'AoW': 'Assault on Women',
-            'DV': 'Domestic Violence',
-            'WT': 'Women Trafficking'
-        }
-
-        india_state_map = {
-            'A & N ISLANDS': 'Andaman and Nicobar',
-            'A & N Islands': 'Andaman and Nicobar',
-            'ANDHRA PRADESH': 'Andhra Pradesh',
-            'Andhra Pradesh': 'Andhra Pradesh',
-            'ARUNACHAL PRADESH': 'Arunachal Pradesh',
-            'Arunachal Pradesh': 'Arunachal Pradesh',
-            'ASSAM': 'Assam',
-            'Assam': 'Assam',
-            'BIHAR': 'Bihar',
-            'Bihar': 'Bihar',
-            'CHANDIGARH': 'Chandigarh',
-            'Chandigarh': 'Chandigarh',
-            'CHHATTISGARH': 'Chhattisgarh',
-            'Chhattisgarh': 'Chhattisgarh',
-            'D & N HAVELI': 'Dadra and Nagar Haveli',
-            'D&N Haveli': 'Dadra and Nagar Haveli',
-            'DAMAN & DIU': 'Daman and Diu',
-            'Daman & Diu': 'Daman and Diu',
-            'DELHI UT': 'Delhi',
-            'Delhi UT': 'Delhi',
-            'GOA': 'Goa',
-            'Goa': 'Goa',
-            'GUJARAT': 'Gujarat',
-            'Gujarat': 'Gujarat',
-            'HARYANA': 'Haryana',
-            'Haryana': 'Haryana',
-            'HIMACHAL PRADESH': 'Himachal Pradesh',
-            'Himachal Pradesh': 'Himachal Pradesh',
-            'JAMMU & KASHMIR': 'Jammu and Kashmir',
-            'Jammu & Kashmir': 'Jammu and Kashmir',
-            'JHARKHAND': 'Jharkhand',
-            'Jharkhand': 'Jharkhand',
-            'KARNATAKA': 'Karnataka',
-            'Karnataka': 'Karnataka',
-            'KERALA': 'Kerala',
-            'Kerala': 'Kerala',
-            'LAKSHADWEEP': 'Lakshadweep',
-            'Lakshadweep': 'Lakshadweep',
-            'MADHYA PRADESH': 'Madhya Pradesh',
-            'Madhya Pradesh': 'Madhya Pradesh',
-            'MAHARASHTRA': 'Maharashtra',
-            'Maharashtra': 'Maharashtra',
-            'MANIPUR': 'Manipur',
-            'Manipur': 'Manipur',
-            'MEGHALAYA': 'Meghalaya',
-            'Meghalaya': 'Meghalaya',
-            'MIZORAM': 'Mizoram',
-            'Mizoram': 'Mizoram',
-            'NAGALAND': 'Nagaland',
-            'Nagaland': 'Nagaland',
-            'ODISHA': 'Odisha',
-            'Odisha': 'Odisha',
-            'PUNJAB': 'Punjab',
-            'Punjab': 'Punjab',
-            'RAJASTHAN': 'Rajasthan',
-            'Rajasthan': 'Rajasthan',
-            'SIKKIM': 'Sikkim',
-            'Sikkim': 'Sikkim',
-            'TAMIL NADU': 'Tamil Nadu',
-            'Tamil Nadu': 'Tamil Nadu',
-            'TELANGANA': 'Telangana',
-            'Telangana': 'Telangana',
-            'TRIPURA': 'Tripura',
-            'Tripura': 'Tripura',
-            'UTTAR PRADESH': 'Uttar Pradesh',
-            'Uttar Pradesh': 'Uttar Pradesh',
-            'UTTARAKHAND': 'Uttarakhand',
-            'Uttarakhand': 'Uttarakhand',
-            'WEST BENGAL': 'West Bengal',
-            'West Bengal': 'West Bengal',
-        }
-
-        crime_columns = ['Rape', 'K&A', 'DD', 'AoW', 'AoM', 'DV', 'WT']
-        active_data = []
-
-        for _, row in dataset.iterrows():
-            state_name = str(row.get('State', '')).strip()
-            geo_state = india_state_map.get(state_name, state_name)
-            if not geo_state:
-                continue
-            year_value = int(row.get('Year', 0))
-            for crime_key, crime_label in crime_categories.items():
-                if crime_key == 'All Crimes Against Women':
-                    value = 0
-                    for col in crime_columns:
-                        value += int(row.get(col, 0) or 0)
-                else:
-                    value = int(row.get(crime_key, 0) or 0)
-                active_data.append({
-                    'state': state_name,
-                    'geo_state': geo_state,
-                    'year': year_value,
-                    'crime': crime_key,
-                    'crime_label': crime_label,
-                    'value': int(value)
-                })
-
-        district_dataset = pd.read_csv('dstrCAW_2013.csv')
-        district_data = []
-        district_column_map = {
-            'Rape': 'Rape',
-            'K&A': 'Kidnapping and Abduction',
-            'DD': 'Dowry Deaths',
-            'AoW': 'Assault on women with intent to outrage her modesty',
-            'AoM': 'Insult to modesty of Women',
-            'DV': 'Cruelty by Husband or his Relatives',
-            'WT': 'Importation of Girls',
-        }
-
-        for _, row in district_dataset.iterrows():
-            state_name = str(row.get('STATE/UT', '')).strip()
-            district_name = str(row.get('DISTRICT', '')).strip()
-            year_value = int(row.get('Year', 0))
-            for crime_key, crime_label in crime_categories.items():
-                if crime_key == 'All Crimes Against Women':
-                    value = 0
-                    for col in district_column_map.values():
-                        value += int(row.get(col, 0) or 0)
-                else:
-                    key_name = district_column_map.get(crime_key)
-                    value = int(row.get(key_name, 0) or 0)
-                district_data.append({
-                    'state': state_name,
-                    'district': district_name,
-                    'year': year_value,
-                    'crime': crime_key,
-                    'crime_label': crime_label,
-                    'value': int(value)
-                })
-
-        years = sorted(dataset['Year'].dropna().astype(int).unique().tolist())
+        heatmap_data = build_state_heatmap_data(dataset)
         context = {
-            'crime_options': json.dumps(list(crime_categories.keys())),
-            'year_options': json.dumps(years),
-            'map_data': json.dumps(active_data),
-            'district_data': json.dumps(district_data),
-            'crime_labels': json.dumps(crime_categories)
+            'crime_options': json.dumps(list(CRIME_CATEGORIES.keys())),
+            'year_options': json.dumps(heatmap_data['years']),
+            'map_data': json.dumps(heatmap_data['records']),
+            'crime_labels': json.dumps(CRIME_CATEGORIES),
+            'geographic_levels': json.dumps(heatmap_data['geographic_levels']),
+            'unmatched_geo_records': heatmap_data['unmatched_records'],
         }
         return render(request, 'Heatmap.html', context)
 
@@ -1324,8 +1694,8 @@ def TrainML(request):
         img_b64 = base64.b64encode(buf.getvalue()).decode()
         plt.clf()
         plt.cla()
-        context= {'data':'Neural Network Accuracy Graph', 'img': img_b64}
-        return render(request, 'UserScreen.html', context)
+        context = {'data': 'Neural Network Accuracy Graph', 'img': img_b64}
+        return render(request, 'TrainML.html', context)
 
 
 def CrimePredict(request):
@@ -1342,11 +1712,16 @@ def CrimePredict(request):
 def CrimePredictAction(request):
     if request.method == 'POST':
         global dataset
-        areaname = request.POST.get('t1', False)
-        crime = dataset.loc[dataset['State'] == areaname]
-        crime = crime['Rape'].ravel()[0]
-        output = "<font size=3 color=blue>Predicted Number of Crimes on Women in "+areaname+" = "+str(crime)+"</font>"
-        context= {'data':output}
+        areaname = (request.POST.get('t1') or '').strip()
+        crime = dataset.loc[dataset['State'] == areaname, 'Rape']
+        if not areaname or crime.empty:
+            context = {'prediction_error': 'Choose a valid state from the available options.'}
+            return render(request, 'UserScreen.html', context)
+
+        context = {
+            'prediction_state': areaname,
+            'prediction_value': crime.iloc[0],
+        }
         return render(request, 'UserScreen.html', context)
 
 
@@ -1373,63 +1748,49 @@ def Panic(request):
             'email_contact_count': email_contact_count,
             'delivery_summary': delivery_summary,
             'public_location_link_configured': bool(build_sos_live_location_url('configuration-check')),
+            'public_location_link_diagnostic': get_sos_public_base_url_diagnostic(),
         })
 
 
 def PanicAction(request):
     if request.method == 'POST':
-        global username, email
-        areaname = request.POST.get('t1', False)
+        current_user, redirect_response = require_logged_in_user(request)
+        if redirect_response is not None:
+            return redirect_response
 
-        if not username or not email:
-            context = {'data': 'Please login first before sending an emergency alert.'}
-            return render(request, 'Panic.html', context)
-
-        sender_email, sender_password = get_panic_email_config()
-        message_text = username + " sent emergency message from location " + areaname + " to you."
-
-        if not sender_email or not sender_password:
-            context = {'data': 'Emergency alert recorded for ' + username + '. Email sending is not configured on this machine.'}
-            return render(request, 'Panic.html', context)
-
-        try:
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as connection:
-                connection.login(sender_email, sender_password)
-                connection.sendmail(from_addr=sender_email, to_addrs=[email], msg=message_text)
-            context = {'data': 'Emergency message sent to registered E-Mail'}
-        except (smtplib.SMTPAuthenticationError, smtplib.SMTPException, OSError) as exc:
-            context = {'data': 'Emergency alert recorded for ' + username + '. Email could not be sent because SMTP credentials are invalid or unavailable.'}
-
-        return render(request, 'Panic.html', context)
+        return render(request, 'Panic.html', {
+            'data': (
+                'The legacy email alert action is disabled. Activate SOS to start '
+                'the current mock-only notification workflow.'
+            ),
+        })
 
 
 def UserLoginAction(request):
-    global username
     if request.method == 'POST':
-        global username, email
         status = "none"
         users = request.POST.get('t1', False)
         password = request.POST.get('t2', False)
         ensure_register_table()
         with get_register_db_connection() as con:
-            cur = con.cursor()
-            cur.execute("SELECT username, password, email FROM register")
-            rows = cur.fetchall()
-            for row in rows:
-                if row['username'] == users and row['password'] == password:
-                    email = row['email']
-                    username = users
-                    request.session['username'] = users
-                    request.session['email'] = row['email']
-                    request.session['is_logged_in'] = True
-                    status = "success"
-                    break
+            row = con.execute(
+                "SELECT username, password, email FROM register WHERE username = ?",
+                (users,),
+            ).fetchone()
+            if row is not None and verify_and_upgrade_registered_password(
+                row['username'], password, row['password'],
+            ):
+                request.session.flush()
+                request.session['username'] = users
+                request.session['email'] = row['email']
+                request.session['is_logged_in'] = True
+                status = "success"
         if status == 'success':
-            context= {'data':'Welcome '+username}
-            return render(request, "UserScreen.html", context)
+            return redirect('index')
         else:
             context= {'data':'Invalid username'}
-            return render(request, 'UserLogin.html', context)
+            context['force_guest_navigation'] = True
+            return add_private_no_store_headers(render(request, 'UserLogin.html', context))
 
 
 def RegisterAction(request):
@@ -1454,7 +1815,7 @@ def RegisterAction(request):
                 "INSERT INTO register (username, password, contact_no, email, address) VALUES (?, ?, ?, ?, ?)",
                 (
                     account['username'],
-                    account['password'],
+                    make_password(account['password']),
                     account['contact'],
                     account['email'],
                     account['address'],
@@ -1498,31 +1859,93 @@ def RegisterAction(request):
 
 def UserLogin(request):
     if request.method == 'GET':
-       return render(request, 'UserLogin.html', {})
+        return add_private_no_store_headers(render(
+            request,
+            'UserLogin.html',
+            {'force_guest_navigation': True},
+        ))
 
 
 def Dashboard(request):
     if request.method == 'GET':
-        current_user = request.session.get('username') or globals().get('username')
-        if not current_user:
-            return redirect('UserLogin')
-        context = {'data': 'Welcome ' + current_user}
-        return render(request, 'UserScreen.html', context)
+        return redirect('index')
 
 
 def Logout(request):
-    if request.method == 'GET':
+    if request.method in ('GET', 'POST'):
         request.session.flush()
-        globals()['username'] = None
-        globals()['email'] = None
-        return redirect('UserLogin')
+        response = redirect('index')
+        return add_private_no_store_headers(response)
 
 
 def index(request):
-    if request.method == 'GET':
-       return render(request, 'index.html', {})
+    if request.method in ('GET', 'HEAD'):
+        current_user, _ = require_logged_in_user(request)
+        context = {'dashboard_user': current_user}
+
+        if current_user is not None:
+            context.update({
+                'emergency_contact_count': EmergencyContact.objects.filter(user=current_user).count(),
+                'journey_count': Journey.objects.filter(user=current_user).count(),
+                'community_report_count': CommunityReport.objects.filter(reporter=current_user).count(),
+                'has_active_sos': SOSEvent.objects.filter(
+                    user=current_user,
+                    status=SOSEvent.STATUS_ACTIVE,
+                ).exists(),
+                'active_safety_timer': SafetyTimerModel.objects.filter(
+                    user=current_user,
+                    status=SafetyTimerModel.STATUS_ACTIVE,
+                    expires_at__gt=timezone.now(),
+                ).order_by('-started_at').first(),
+            })
+
+            recent_activities = []
+            for activity in JourneyActivity.objects.filter(
+                journey__user=current_user,
+            ).select_related('journey').order_by('-occurred_at')[:5]:
+                recent_activities.append({
+                    'title': 'Journey: {}'.format(activity.get_action_display()),
+                    'occurred_at': activity.occurred_at,
+                    'status': '',
+                })
+            for event in SOSEvent.objects.filter(user=current_user).order_by('-activated_at')[:5]:
+                recent_activities.append({
+                    'title': 'SOS alert',
+                    'occurred_at': event.activated_at,
+                    'status': event.get_status_display(),
+                })
+            for timer in SafetyTimerModel.objects.filter(user=current_user).order_by('-started_at')[:5]:
+                recent_activities.append({
+                    'title': 'Safety timer',
+                    'occurred_at': timer.started_at,
+                    'status': timer.get_status_display(),
+                })
+            for contact in EmergencyContact.objects.filter(user=current_user).order_by('-created_at')[:5]:
+                recent_activities.append({
+                    'title': 'Emergency contact added',
+                    'occurred_at': contact.created_at,
+                    'status': '',
+                })
+            for report in CommunityReport.objects.filter(reporter=current_user).order_by('-created_at')[:5]:
+                recent_activities.append({
+                    'title': 'Community report submitted',
+                    'occurred_at': report.created_at,
+                    'status': report.get_status_display(),
+                })
+
+            context['recent_activities'] = sorted(
+                recent_activities,
+                key=lambda activity: activity['occurred_at'],
+                reverse=True,
+            )[:5]
+
+        return render(request, 'index.html', context)
 
 
 def Register(request):
     if request.method == 'GET':
-       return render(request, 'Register.html', {})
+        return add_private_no_store_headers(render(
+            request,
+            'Register.html',
+            {'force_guest_navigation': True},
+        ))
